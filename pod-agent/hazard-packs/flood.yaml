@@ -1,0 +1,8 @@
+# Flood hazard pack — water level sensor (Meraki MT12 + river probe in production)
+name: flood
+sensor: water_level          # cm
+threshold: 150               # absolute danger level
+trend_window: 5              # readings
+trend_min_rise: 25           # cm rise across the window = "rising fast"
+severity: 9
+alert: "FLOOD WARNING at {site}: water level {value} cm and rising. Move to elevated shelter now. Follow volunteer instructions."

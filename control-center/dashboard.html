@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SANJEEVANI — EOC Dashboard</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #0d1620; color: #e6edf3; }
+  header { background: #0d274d; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 18px; margin: 0; } header span { color: #7fb3d8; font-size: 13px; }
+  main { padding: 16px 20px; display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
+  .full { grid-column: 1 / -1; }
+  .card { background: #141f2b; border: 1px solid #24354a; border-radius: 10px; padding: 12px 14px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #7fb3d8; margin: 0 0 8px; }
+  .paths { display: flex; gap: 10px; flex-wrap: wrap; }
+  .path { flex: 1; min-width: 140px; border-radius: 8px; padding: 10px; font-size: 13px; }
+  .up { background: #0e2e22; border: 1px solid #1d9e75; }
+  .deg { background: #33260c; border: 1px solid #ba7517; }
+  .down { background: #331111; border: 1px solid #a32d2d; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: #7fb3d8; font-weight: 500; padding: 4px 6px; border-bottom: 1px solid #24354a; }
+  td { padding: 5px 6px; border-bottom: 1px solid #1b2836; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
+  .t2 { background: #0e2e22; color: #5dcaa5; } .t1 { background: #33260c; color: #fac775; }
+  .t0 { background: #331111; color: #f09595; } .off { background: #24354a; color: #8aa0b8; }
+  .sev { display: inline-block; min-width: 20px; text-align: center; border-radius: 5px; padding: 1px 5px;
+         font-size: 12px; color: #fff; }
+  .sync { color: #fac775; font-size: 11px; } .muted { color: #6b8299; font-size: 12px; }
+  .sec { color: #f09595; font-size: 13px; padding: 3px 0; }
+  button { background: #049fd9; color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .qd { font-size: 12px; color: #6b8299; margin-left: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SANJEEVANI — Emergency Operations Center</h1>
+  <span>Splunk-equivalent live view · <span id="clock"></span></span>
+</header>
+<main>
+  <div class="card full">
+    <h2>Transport paths (ThousandEyes view)
+      <span class="qd" id="qd"></span>
+      <button style="float:right" onclick="testAlert()">Broadcast signed test alert</button>
+    </h2>
+    <div class="paths" id="paths"></div>
+  </div>
+
+  <div class="card">
+    <h2>Resilience pods</h2>
+    <table><thead><tr><th>Pod</th><th>Site</th><th>Tier</th><th>Mode</th><th>Queue</th><th>Seen</th></tr></thead>
+      <tbody id="pods"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2>Shield — security events</h2>
+    <div id="security" class="muted">None. All alerts verified.</div>
+  </div>
+
+  <div class="card full">
+    <h2>Event feed (triaged)</h2>
+    <table><thead><tr><th>Time</th><th>Pod</th><th>Type</th><th>Sev</th><th>Detail</th><th>Why</th><th>Via</th></tr></thead>
+      <tbody id="events"></tbody></table>
+  </div>
+</main>
+<script>
+const sevColor = s => s >= 8 ? '#a32d2d' : s >= 5 ? '#ba7517' : '#0f6e56';
+
+async function refresh() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+  let s;
+  try { s = await (await fetch('/state')).json(); } catch (e) { return; }
+
+  document.getElementById('qd').textContent =
+    `queue depth — SOS lane: ${s.queue_depth.sos} · standard: ${s.queue_depth.std}`;
+
+  document.getElementById('paths').innerHTML = Object.entries(s.paths).map(([n, p]) => {
+    const cls = !p.up ? 'down' : p.loss >= 0.25 ? 'deg' : 'up';
+    const label = !p.up ? 'DOWN' : p.loss >= 0.25 ? `DEGRADED · loss ${(p.loss*100)|0}%` : `UP · ${p.latency_ms} ms`;
+    return `<div class="path ${cls}"><strong>${n}</strong><br>${label}</div>`;
+  }).join('');
+
+  document.getElementById('pods').innerHTML = Object.entries(s.pods).map(([id, p]) => {
+    const tier = p.offline ? '<span class="chip off">island / no contact</span>'
+      : `<span class="chip ${p.tier.toLowerCase()}">${p.tier}${p.via ? ' · ' + p.via : ''}</span>`;
+    return `<tr><td>${id}</td><td>${p.site || ''}</td><td>${tier}</td>
+      <td>${p.mode || ''}</td><td>${p.queue_len}</td><td>${p.last_seen_s}s</td></tr>`;
+  }).join('');
+
+  document.getElementById('security').innerHTML = s.security.length
+    ? s.security.map(e => `<div class="sec">⛔ ${e.at} · ${e.pod} — ${e.detail}</div>`).join('')
+    : '<span class="muted">None. All alerts verified.</span>';
+
+  document.getElementById('events').innerHTML = s.events
+    .filter(e => e.type !== 'heartbeat')
+    .map(e => `<tr><td>${e.at}${e.queued_sync ? ' <span class="sync">⟳ synced from queue</span>' : ''}</td>
+      <td>${e.pod}</td><td>${e.type}</td>
+      <td>${e.severity ? `<span class="sev" style="background:${sevColor(e.severity)}">${e.severity}</span>` : ''}</td>
+      <td>${e.text || ''}</td><td class="muted">${e.reason || ''}</td><td class="muted">${e.via}</td></tr>`)
+    .join('');
+}
+setInterval(refresh, 2000); refresh();
+
+async function testAlert() {
+  await fetch('/broadcast-alert', { method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ hazard: 'drill', message: 'This is a signed EOC test alert. No action needed.' }) });
+}
+</script>
+</body>
+</html>

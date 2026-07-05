@@ -1,0 +1,7 @@
+# Earthquake hazard pack — accelerometer (third-party sensor via MQTT in production)
+# No meaningful lead time: pure threshold, post-event playbook (headcounts, SOS).
+name: earthquake
+sensor: shake_g              # peak ground acceleration, g
+threshold: 0.4
+severity: 10
+alert: "EARTHQUAKE detected near {site} ({value} g). If safe, gather at the open assembly area. Report missing persons at the help desk or portal."
