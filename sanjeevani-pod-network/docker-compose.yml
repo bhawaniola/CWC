@@ -1,0 +1,197 @@
+services:
+  cloud-api:
+    build: ./cloud-api
+    container_name: sanjeevani-cloud-api
+    ports:
+      - "9000:9000"
+
+  pod-01:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-01
+    depends_on:
+      - cloud-api
+    ports:
+      - "8001:8000"
+    environment:
+      POD_ID: POD-01
+      POD_NAME: District Command Pod
+      POD_REGION: Region-01
+      CLOUD_URL: http://cloud-api:9000
+      NEIGHBORS: http://pod-02:8000,http://pod-03:8000
+      MANAGER_API_KEY: sanjeevani-manager-demo-key
+    volumes:
+      - ./pod-data/pod-01:/app/data
+
+  pod-02:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-02
+    depends_on:
+      - cloud-api
+    ports:
+      - "8002:8000"
+    environment:
+      POD_ID: POD-02
+      POD_NAME: Hospital Relief Pod
+      POD_REGION: Region-02
+      CLOUD_URL: http://cloud-api:9000
+      NEIGHBORS: http://pod-01:8000,http://pod-04:8000
+      MANAGER_API_KEY: sanjeevani-manager-demo-key
+    volumes:
+      - ./pod-data/pod-02:/app/data
+
+  pod-03:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-03
+    depends_on:
+      - cloud-api
+    ports:
+      - "8003:8000"
+    environment:
+      POD_ID: POD-03
+      POD_NAME: School Shelter Pod
+      POD_REGION: Region-03
+      CLOUD_URL: http://cloud-api:9000
+      NEIGHBORS: http://pod-01:8000,http://pod-05:8000
+      MANAGER_API_KEY: sanjeevani-manager-demo-key
+    volumes:
+      - ./pod-data/pod-03:/app/data
+
+  pod-04:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-04
+    depends_on:
+      - cloud-api
+    ports:
+      - "8004:8000"
+    environment:
+      POD_ID: POD-04
+      POD_NAME: Riverbank Village Pod
+      POD_REGION: Region-04
+      CLOUD_URL: http://cloud-api:9000
+      NEIGHBORS: http://pod-02:8000,http://pod-06:8000
+      MANAGER_API_KEY: sanjeevani-manager-demo-key
+    volumes:
+      - ./pod-data/pod-04:/app/data
+
+  pod-05:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-05
+    depends_on:
+      - cloud-api
+    ports:
+      - "8005:8000"
+    environment:
+      POD_ID: POD-05
+      POD_NAME: Evacuation Route Pod
+      POD_REGION: Region-05
+      CLOUD_URL: http://cloud-api:9000
+      NEIGHBORS: http://pod-03:8000,http://pod-07:8000
+      MANAGER_API_KEY: sanjeevani-manager-demo-key
+    volumes:
+      - ./pod-data/pod-05:/app/data
+
+  pod-06:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-06
+    depends_on:
+      - cloud-api
+    ports:
+      - "8006:8000"
+    environment:
+      POD_ID: POD-06
+      POD_NAME: Remote Village Pod
+      POD_REGION: Region-06
+      CLOUD_URL: http://cloud-api:9000
+      NEIGHBORS: http://pod-04:8000,http://pod-08:8000
+      MANAGER_API_KEY: sanjeevani-manager-demo-key
+    volumes:
+      - ./pod-data/pod-06:/app/data
+
+  pod-07:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-07
+    depends_on:
+      - cloud-api
+    ports:
+      - "8007:8000"
+    environment:
+      POD_ID: POD-07
+      POD_NAME: Supply Warehouse Pod
+      POD_REGION: Region-07
+      CLOUD_URL: http://cloud-api:9000
+      NEIGHBORS: http://pod-05:8000,http://pod-09:8000
+      MANAGER_API_KEY: sanjeevani-manager-demo-key
+    volumes:
+      - ./pod-data/pod-07:/app/data
+
+  pod-08:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-08
+    depends_on:
+      - cloud-api
+    ports:
+      - "8008:8000"
+    environment:
+      POD_ID: POD-08
+      POD_NAME: Medical Camp Pod
+      POD_REGION: Region-08
+      CLOUD_URL: http://cloud-api:9000
+      NEIGHBORS: http://pod-06:8000,http://pod-10:8000
+      MANAGER_API_KEY: sanjeevani-manager-demo-key
+    volumes:
+      - ./pod-data/pod-08:/app/data
+
+  pod-09:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-09
+    depends_on:
+      - cloud-api
+    ports:
+      - "8009:8000"
+    environment:
+      POD_ID: POD-09
+      POD_NAME: High Ground Shelter Pod
+      POD_REGION: Region-09
+      CLOUD_URL: http://cloud-api:9000
+      NEIGHBORS: http://pod-07:8000,http://pod-10:8000
+      MANAGER_API_KEY: sanjeevani-manager-demo-key
+    volumes:
+      - ./pod-data/pod-09:/app/data
+
+  pod-10:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-10
+    depends_on:
+      - cloud-api
+    ports:
+      - "8010:8000"
+    environment:
+      POD_ID: POD-10
+      POD_NAME: Mobile Relay Pod
+      POD_REGION: Region-10
+      CLOUD_URL: http://cloud-api:9000
+      NEIGHBORS: http://pod-08:8000,http://pod-09:8000
+      MANAGER_API_KEY: sanjeevani-manager-demo-key
+    volumes:
+      - ./pod-data/pod-10:/app/data
+
+  pod-simulator:
+    build: ./pod-simulator
+    container_name: sanjeevani-pod-simulator
+    depends_on:
+      - pod-01
+      - pod-02
+      - pod-03
+      - pod-04
+      - pod-05
+      - pod-06
+      - pod-07
+      - pod-08
+      - pod-09
+      - pod-10
+    ports:
+      - "8100:8100"
+    environment:
+      PORT: 8100
+      MANAGER_API_KEY: sanjeevani-manager-demo-key
+      PODS: POD-01=http://pod-01:8000,POD-02=http://pod-02:8000,POD-03=http://pod-03:8000,POD-04=http://pod-04:8000,POD-05=http://pod-05:8000,POD-06=http://pod-06:8000,POD-07=http://pod-07:8000,POD-08=http://pod-08:8000,POD-09=http://pod-09:8000,POD-10=http://pod-10:8000

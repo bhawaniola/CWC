@@ -1,0 +1,7 @@
+node_modules/
+pod-data/
+pod-agent/public/
+pod-simulator/public/
+npm-debug.log*
+Dockerfile.*.tmp
+.env
