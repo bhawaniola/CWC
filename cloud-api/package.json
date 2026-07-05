@@ -1,0 +1,14 @@
+{
+  "name": "sanjeevani-cloud-api",
+  "version": "1.0.0",
+  "description": "In-memory SANJEEVANI cloud API for pod request intake.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.3"
+  }
+}

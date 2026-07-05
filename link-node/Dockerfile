@@ -6,11 +6,7 @@ COPY package*.json ./
 RUN npm install --omit=dev
 
 COPY server.js ./
-COPY services ./services
-COPY public ./public
 
-RUN mkdir -p /app/data
-
-EXPOSE 8000
+EXPOSE 9100 9201 9202
 
 CMD ["npm", "start"]

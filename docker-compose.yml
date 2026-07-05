@@ -1,84 +1,284 @@
 services:
-  redis:
-    image: redis:7-alpine
-    container_name: sanjeevani_redis
-
-  control-center:
-    build: ./control-center
-    container_name: control_center
-    ports: ["9000:9000"]
-    environment:
-      REDIS_URL: redis://redis:6379
-      RELAYS: "satellite=http://satellite:8000,cell_tower_1=http://cell_tower_1:8000,cell_tower_2=http://cell_tower_2:8000"
-      POD_URLS: "pod1=http://pod1:8000,pod2=http://pod2:8000,pod3=http://pod3:8000,pod4=http://pod4:8000"
-      WEBEX_TOKEN: "${WEBEX_TOKEN:-}"
-      WEBEX_ROOM_ID: "${WEBEX_ROOM_ID:-}"
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
-      ANTHROPIC_MODEL: "${ANTHROPIC_MODEL:-claude-haiku-4-5-20251001}"
-    depends_on: [redis]
+  cloud-api:
+    build: ./cloud-api
+    container_name: sanjeevani-cloud-api
+    ports:
+      - "9000:9000"
+    networks:
+      - sanjeevani-net
 
   satellite:
-    build: ./relay
-    container_name: satellite
-    ports: ["9101:8000"]
-    environment: { NAME: satellite, LATENCY_MS: "80", CC_URL: "http://control-center:9000" }
-
-  cell_tower_1:
-    build: ./relay
-    container_name: cell_tower_1
-    ports: ["9102:8000"]
-    environment: { NAME: cell_tower_1, LATENCY_MS: "30", CC_URL: "http://control-center:9000" }
-
-  cell_tower_2:
-    build: ./relay
-    container_name: cell_tower_2
-    ports: ["9103:8000"]
-    environment: { NAME: cell_tower_2, LATENCY_MS: "30", CC_URL: "http://control-center:9000" }
-
-  pod1:
-    build: ./pod-agent
-    container_name: pod1
-    ports: ["9201:8000"]
+    build: ./link-node
+    container_name: sanjeevani-satellite
+    depends_on:
+      - cloud-api
+    ports:
+      - "9100:9100"
     environment:
-      POD_ID: pod1
-      SITE: "Riverside School Shelter"
-      SATELLITE_URL: "http://satellite:8000"
-      TOWER_URL: "http://cell_tower_1:8000"
-      NEIGHBORS: "http://pod2:8000"
-      CC_PUBKEY_URL: "http://control-center:9000/pubkey"
+      LINK_ID: satellite
+      LINK_TYPE: satellite
+      PORT: 9100
+      CLOUD_URL: http://cloud-api:9000
+    networks:
+      - sanjeevani-net
 
-  pod2:
-    build: ./pod-agent
-    container_name: pod2
-    ports: ["9202:8000"]
+  celltower-1:
+    build: ./link-node
+    container_name: sanjeevani-celltower-1
+    depends_on:
+      - cloud-api
+    ports:
+      - "9201:9201"
     environment:
-      POD_ID: pod2
-      SITE: "Community Hall Shelter"
-      SATELLITE_URL: "http://satellite:8000"
-      TOWER_URL: "http://cell_tower_1:8000"
-      NEIGHBORS: "http://pod1:8000,http://pod3:8000"
-      CC_PUBKEY_URL: "http://control-center:9000/pubkey"
+      LINK_ID: CELLTOWER-1
+      LINK_TYPE: cellular
+      PORT: 9201
+      CLOUD_URL: http://cloud-api:9000
+    networks:
+      - sanjeevani-net
 
-  pod3:
-    build: ./pod-agent
-    container_name: pod3
-    ports: ["9203:8000"]
+  celltower-2:
+    build: ./link-node
+    container_name: sanjeevani-celltower-2
+    depends_on:
+      - cloud-api
+    ports:
+      - "9202:9202"
     environment:
-      POD_ID: pod3
-      SITE: "District Hospital Camp"
-      SATELLITE_URL: "http://satellite:8000"
-      TOWER_URL: "http://cell_tower_2:8000"
-      NEIGHBORS: "http://pod2:8000,http://pod4:8000"
-      CC_PUBKEY_URL: "http://control-center:9000/pubkey"
+      LINK_ID: CELLTOWER-2
+      LINK_TYPE: cellular
+      PORT: 9202
+      CLOUD_URL: http://cloud-api:9000
+    networks:
+      - sanjeevani-net
 
-  pod4:
-    build: ./pod-agent
-    container_name: pod4
-    ports: ["9204:8000"]
+  simulation-controller:
+    build: ./simulation-controller
+    container_name: sanjeevani-simulation-controller
+    depends_on:
+      - satellite
+      - celltower-1
+      - celltower-2
+    ports:
+      - "9300:9300"
     environment:
-      POD_ID: pod4
-      SITE: "Hilltop Relief Center"
-      SATELLITE_URL: "http://satellite:8000"
-      TOWER_URL: "http://cell_tower_2:8000"
-      NEIGHBORS: "http://pod3:8000"
-      CC_PUBKEY_URL: "http://control-center:9000/pubkey"
+      SATELLITE_URL: http://satellite:9100
+      CELLTOWER_1_URL: http://celltower-1:9201
+      CELLTOWER_2_URL: http://celltower-2:9202
+      SATELLITE_CONTAINER: sanjeevani-satellite
+      CELLTOWER_1_CONTAINER: sanjeevani-celltower-1
+      CELLTOWER_2_CONTAINER: sanjeevani-celltower-2
+      DOCKER_SOCKET: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - sanjeevani-net
+
+  pod-01:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-01
+    depends_on: &pod_dependencies
+      - cloud-api
+      - satellite
+      - celltower-1
+      - celltower-2
+      - simulation-controller
+    ports:
+      - "8001:8000"
+    environment:
+      POD_ID: POD-01
+      POD_NAME: District Command Pod
+      POD_REGION: Region-01
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
+      CONNECTED_TOWERS: CELLTOWER-1
+      NEIGHBORS: http://pod-02:8000,http://pod-03:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./pod-data/pod-01:/app/data
+    networks:
+      - sanjeevani-net
+
+  pod-02:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-02
+    depends_on: *pod_dependencies
+    ports:
+      - "8002:8000"
+    environment:
+      POD_ID: POD-02
+      POD_NAME: Hospital Relief Pod
+      POD_REGION: Region-02
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
+      CONNECTED_TOWERS: CELLTOWER-1
+      NEIGHBORS: http://pod-01:8000,http://pod-04:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./pod-data/pod-02:/app/data
+    networks:
+      - sanjeevani-net
+
+  pod-03:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-03
+    depends_on: *pod_dependencies
+    ports:
+      - "8003:8000"
+    environment:
+      POD_ID: POD-03
+      POD_NAME: School Shelter Pod
+      POD_REGION: Region-03
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
+      CONNECTED_TOWERS: CELLTOWER-1
+      NEIGHBORS: http://pod-01:8000,http://pod-05:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./pod-data/pod-03:/app/data
+    networks:
+      - sanjeevani-net
+
+  pod-04:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-04
+    depends_on: *pod_dependencies
+    ports:
+      - "8004:8000"
+    environment:
+      POD_ID: POD-04
+      POD_NAME: Riverbank Village Pod
+      POD_REGION: Region-04
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
+      CONNECTED_TOWERS: CELLTOWER-1
+      NEIGHBORS: http://pod-02:8000,http://pod-06:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./pod-data/pod-04:/app/data
+    networks:
+      - sanjeevani-net
+
+  pod-05:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-05
+    depends_on: *pod_dependencies
+    ports:
+      - "8005:8000"
+    environment:
+      POD_ID: POD-05
+      POD_NAME: Evacuation Route Pod
+      POD_REGION: Region-05
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201,CELLTOWER-2=http://celltower-2:9202
+      CONNECTED_TOWERS: CELLTOWER-1,CELLTOWER-2
+      NEIGHBORS: http://pod-03:8000,http://pod-07:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./pod-data/pod-05:/app/data
+    networks:
+      - sanjeevani-net
+
+  pod-06:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-06
+    depends_on: *pod_dependencies
+    ports:
+      - "8006:8000"
+    environment:
+      POD_ID: POD-06
+      POD_NAME: Remote Village Pod
+      POD_REGION: Region-06
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-2=http://celltower-2:9202
+      CONNECTED_TOWERS: CELLTOWER-2
+      NEIGHBORS: http://pod-04:8000,http://pod-08:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./pod-data/pod-06:/app/data
+    networks:
+      - sanjeevani-net
+
+  pod-07:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-07
+    depends_on: *pod_dependencies
+    ports:
+      - "8007:8000"
+    environment:
+      POD_ID: POD-07
+      POD_NAME: Supply Warehouse Pod
+      POD_REGION: Region-07
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-2=http://celltower-2:9202
+      CONNECTED_TOWERS: CELLTOWER-2
+      NEIGHBORS: http://pod-05:8000,http://pod-09:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./pod-data/pod-07:/app/data
+    networks:
+      - sanjeevani-net
+
+  pod-08:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-08
+    depends_on: *pod_dependencies
+    ports:
+      - "8008:8000"
+    environment:
+      POD_ID: POD-08
+      POD_NAME: Medical Camp Pod
+      POD_REGION: Region-08
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-2=http://celltower-2:9202
+      CONNECTED_TOWERS: CELLTOWER-2
+      NEIGHBORS: http://pod-06:8000,http://pod-10:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./pod-data/pod-08:/app/data
+    networks:
+      - sanjeevani-net
+
+  pod-09:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-09
+    depends_on: *pod_dependencies
+    ports:
+      - "8009:8000"
+    environment:
+      POD_ID: POD-09
+      POD_NAME: High Ground Shelter Pod
+      POD_REGION: Region-09
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: ""
+      CONNECTED_TOWERS: ""
+      NEIGHBORS: http://pod-07:8000,http://pod-10:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./pod-data/pod-09:/app/data
+    networks:
+      - sanjeevani-net
+
+  pod-10:
+    build: ./pod-agent
+    container_name: sanjeevani-pod-10
+    depends_on: *pod_dependencies
+    ports:
+      - "8010:8000"
+    environment:
+      POD_ID: POD-10
+      POD_NAME: Mobile Relay Pod
+      POD_REGION: Region-10
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: ""
+      CONNECTED_TOWERS: ""
+      NEIGHBORS: http://pod-08:8000,http://pod-09:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./pod-data/pod-10:/app/data
+    networks:
+      - sanjeevani-net
+
+networks:
+  sanjeevani-net:
+    name: sanjeevani-net

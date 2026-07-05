@@ -14,8 +14,9 @@ Setup (free):
 
 Usage:
   py -3.13 integrations/meraki_live.py
-  py -3.13 integrations/meraki_live.py --feed-pod http://localhost:9201
+  py -3.13 integrations/meraki_live.py --feed-pod http://localhost:8001
 """
+import argparse
 import json
 import os
 import sys
@@ -24,6 +25,7 @@ import urllib.request
 
 BASE = os.getenv("MERAKI_BASE", "https://api.meraki.com/api/v1")
 KEY = os.getenv("MERAKI_API_KEY", "")
+DEFAULT_CONTROL_CENTER = os.getenv("CONTROL_CENTER_URL", "http://localhost:9000")
 
 ROLE = {"wireless": "Meraki MR  -> pod shelter Wi-Fi (captive portal)",
         "switch": "Meraki MS  -> pod PoE backbone (Catalyst-class)",
@@ -40,7 +42,68 @@ def api(path):
         return json.loads(r.read())
 
 
+def post_json(url, payload):
+    body = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read())
+
+
+def report_sensor(control_center, pod_id, metric, value, unit, raw=None):
+    payload = {
+        "podId": pod_id,
+        "deviceName": "Meraki MT Sensor",
+        "deviceType": "Meraki MT",
+        "metric": metric,
+        "value": value,
+        "unit": unit,
+        "raw": raw,
+    }
+    return post_json(f"{control_center.rstrip('/')}/api/integrations/meraki/sensor", payload)
+
+
+def parser():
+    p = argparse.ArgumentParser(description="Connect Meraki telemetry to SANJEEVANI control center.")
+    p.add_argument("--control-center", default=DEFAULT_CONTROL_CENTER,
+                   help="SANJEEVANI control center URL. Default: http://localhost:9000")
+    p.add_argument("--pod-id", default="POD-01",
+                   help="SANJEEVANI pod id to map the sensor event to.")
+    p.add_argument("--demo", action="store_true",
+                   help="Do not call Meraki. Send a local sample sensor event to control center.")
+    p.add_argument("--feed-control-center", action="store_true",
+                   help="Send the latest real Meraki temperature reading to control center.")
+    p.add_argument("--feed-pod", help="Legacy Python POC option. Prefer --feed-control-center.")
+    return p
+
+
 def main():
+    args = parser().parse_args()
+
+    if args.demo:
+        if args.feed_pod:
+            out = post_json(f"{args.feed_pod.rstrip('/')}/sensor", {
+                "sensor": "temperature",
+                "value": 46.5,
+                "unit": "celsius",
+                "source": "Meraki demo telemetry"
+            })
+            print(f"Fed demo Meraki event into active pod {args.feed_pod}:")
+        else:
+            out = report_sensor(
+                args.control_center,
+                args.pod_id,
+                "temperature",
+                46.5,
+                "celsius",
+                {"mode": "demo", "source": "integrations/meraki_live.py"})
+            print(f"Sent demo Meraki event to {args.control_center}:")
+        print(json.dumps(out, indent=2))
+        return
+
     if not KEY:
         sys.exit("MERAKI_API_KEY is not set — see the setup steps at the top "
                  "of this file (free DevNet sandbox or Meraki trial org).")
@@ -78,7 +141,25 @@ def main():
             if metric == "temperature" and isinstance(val, dict):
                 latest_temp = val.get("celsius")
 
-    if "--feed-pod" in sys.argv:
+    if args.feed_control_center:
+        value = latest_temp if latest_temp is not None else 22.0
+        out = report_sensor(args.control_center, args.pod_id, "temperature",
+                            value, "celsius", {"source": "Meraki Dashboard API"})
+        print(f"\nFed REAL Meraki reading temperature={value}C into {args.control_center}:")
+        print(json.dumps(out, indent=2))
+
+    if args.feed_pod:
+        value = latest_temp if latest_temp is not None else 22.0
+        out = post_json(f"{args.feed_pod.rstrip('/')}/sensor", {
+            "sensor": "temperature",
+            "value": value,
+            "unit": "celsius",
+            "source": "Meraki Dashboard API"
+        })
+        print(f"\nFed Meraki temperature={value}C into active pod {args.feed_pod}:")
+        print(json.dumps(out, indent=2))
+
+    if False and "--feed-pod" in sys.argv:
         pod = sys.argv[sys.argv.index("--feed-pod") + 1]
         value = latest_temp if latest_temp is not None else 22.0
         body = json.dumps({"sensor": "temperature", "value": value}).encode()

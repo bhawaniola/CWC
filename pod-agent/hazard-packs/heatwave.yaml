@@ -1,9 +1,0 @@
-# Heatwave hazard pack — temperature (Meraki MT10 in production).
-# Wired to integrations/meraki_live.py --feed-pod: a REAL Meraki MT sensor
-# reading can drive this pack. Lower the threshold during a demo to show
-# genuine Cisco telemetry triggering a signed alert end-to-end.
-name: heatwave
-sensor: temperature          # °C
-threshold: 45
-severity: 7
-alert: "HEATWAVE advisory at {site}: {value} C. Cooling center open — capacity shown live on the portal. Check on elderly neighbours."

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SANJEEVANI Pod SOS</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">SANJEEVANI local Wi-Fi</p>
+        <h1 id="podHeading">Emergency SOS intake</h1>
+        <p class="subtitle">Requests are triaged locally, then routed through satellite, cellular, mesh relay, or queued safely in island mode.</p>
+      </div>
+      <div class="status-tile mode-tile" aria-live="polite">
+        <span id="modeBadge" class="mode-badge">Checking</span>
+        <strong id="activePath">Path: checking</strong>
+        <span id="routeDetail">Route detail loading</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel sos-panel" aria-labelledby="sosTitle">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Citizen request</p>
+            <h2 id="sosTitle">Send an SOS to this pod</h2>
+          </div>
+          <span id="podId" class="pill">-</span>
+        </div>
+
+        <form id="requestForm" class="request-form">
+          <label>
+            Name
+            <input name="name" type="text" value="Ramesh Kumar" autocomplete="name" required>
+          </label>
+          <label>
+            Age
+            <input name="age" type="number" min="0" value="68" inputmode="numeric">
+          </label>
+          <label>
+            Phone
+            <input name="phone" type="tel" value="+91 9876543210" autocomplete="tel">
+          </label>
+          <label>
+            Need
+            <select name="category">
+              <option>Medical</option>
+              <option>Rescue</option>
+              <option>Food</option>
+              <option>Water</option>
+              <option>Shelter</option>
+              <option>Other</option>
+            </select>
+          </label>
+          <label class="full">
+            Location
+            <input name="location" type="text" value="Kothapalli Zone 3" autocomplete="street-address" required>
+          </label>
+          <label class="full">
+            SOS message
+            <textarea name="message" rows="6" required>My grandfather needs insulin and cannot walk</textarea>
+          </label>
+          <button class="primary" type="submit">Send SOS</button>
+        </form>
+
+        <div id="submissionNotice" class="notice ready" role="status">
+          <strong>Ready.</strong>
+          <span>Submit a request to watch the current network route being used.</span>
+        </div>
+      </section>
+
+      <aside class="rail">
+        <section class="panel identity-panel" aria-labelledby="podTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Current pod</p>
+              <h2 id="podTitle">Local identity</h2>
+            </div>
+            <button id="refreshStatus" type="button">Refresh</button>
+          </div>
+          <dl class="facts">
+            <div><dt>Display name</dt><dd id="podName">-</dd></div>
+            <div><dt>Region</dt><dd id="region">-</dd></div>
+            <div><dt>Queued SOS</dt><dd id="queuedRequests">0</dd></div>
+          </dl>
+          <form id="podNameForm" class="inline-form">
+            <label>
+              Edit display name
+              <input id="podNameInput" name="podName" type="text" maxlength="80" placeholder="Pod display name">
+            </label>
+            <button type="submit">Save</button>
+          </form>
+        </section>
+
+        <section class="panel" aria-labelledby="infraTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Global infrastructure</p>
+              <h2 id="infraTitle">Backhaul links</h2>
+            </div>
+          </div>
+          <div class="path-grid">
+            <article class="path-card" data-infra-card="satellite"><span>Satellite</span><strong id="infraSatellite">-</strong></article>
+            <article class="path-card" data-infra-card="celltower1"><span>CELLTOWER-1</span><strong id="infraCelltower1">-</strong></article>
+            <article class="path-card" data-infra-card="celltower2"><span>CELLTOWER-2</span><strong id="infraCelltower2">-</strong></article>
+          </div>
+          <a class="controller-link" href="http://localhost:9300">Open simulation controller</a>
+        </section>
+      </aside>
+
+      <section class="panel full-width" aria-labelledby="networkTitle">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Local routing policy</p>
+            <h2 id="networkTitle">This pod's enabled paths</h2>
+          </div>
+          <button id="manualSync" type="button">Sync queue</button>
+        </div>
+        <div class="route-board">
+          <article class="route-card" data-path-card="satellite">
+            <span>Satellite permission</span>
+            <strong id="satelliteState">-</strong>
+            <small id="satelliteHealth">health: -</small>
+            <div class="mini-actions">
+              <button type="button" data-network-path="satellite" data-network-state="disable">Disable</button>
+              <button type="button" data-network-path="satellite" data-network-state="enable">Enable</button>
+            </div>
+          </article>
+          <article class="route-card" data-path-card="cellular">
+            <span>Cellular permission</span>
+            <strong id="cellularState">-</strong>
+            <small id="cellularHealth">health: -</small>
+            <div class="mini-actions">
+              <button type="button" data-network-path="cellular" data-network-state="disable">Disable</button>
+              <button type="button" data-network-path="cellular" data-network-state="enable">Enable</button>
+            </div>
+          </article>
+          <article class="route-card" data-path-card="mesh">
+            <span>Mesh permission</span>
+            <strong id="meshState">-</strong>
+            <small id="meshDetail">neighbors: -</small>
+            <div class="mini-actions">
+              <button type="button" data-network-path="mesh" data-network-state="disable">Disable</button>
+              <button type="button" data-network-path="mesh" data-network-state="enable">Enable</button>
+            </div>
+          </article>
+        </div>
+        <div class="tower-list" id="towerList"></div>
+        <p class="health-meta" id="healthPollMeta">Health poll: waiting</p>
+        <div id="operatorNotice" class="notice compact" role="status"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

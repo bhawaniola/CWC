@@ -1,0 +1,380 @@
+const axios = require("axios");
+const localQueue = require("./localQueue");
+const podSettings = require("./podSettings");
+
+const podInfo = {
+  podId: process.env.POD_ID || "POD-LOCAL",
+  podName: process.env.POD_NAME || "Local SANJEEVANI Pod",
+  region: process.env.POD_REGION || "Region-Local",
+  satelliteUrl: normalizeUrl(process.env.SATELLITE_URL || "http://satellite:9100"),
+  cellTowers: parseCellTowers(process.env.CELL_TOWERS || "", process.env.CONNECTED_TOWERS || ""),
+  connectedTowers: parseList(process.env.CONNECTED_TOWERS || ""),
+  neighbors: parseList(process.env.NEIGHBORS || "").map(normalizeUrl),
+  simulationControllerUrl: normalizeUrl(
+    process.env.SIMULATION_CONTROLLER_URL || "http://simulation-controller:9300"
+  )
+};
+
+const HEALTH_POLL_INTERVAL_MS = Number(process.env.HEALTH_POLL_INTERVAL_MS || 5000);
+let healthPollTimer = null;
+let lastHealthSignature = "";
+let latestHealthSnapshot = {
+  satelliteStatus: "unknown",
+  cellularStatus: podInfo.cellTowers.length > 0 ? "unknown" : "not-configured",
+  cellTowerStatuses: podInfo.cellTowers.map((tower) => ({
+    name: tower.name,
+    url: tower.url,
+    status: "unknown"
+  })),
+  checkedAt: null,
+  pollIntervalMs: HEALTH_POLL_INTERVAL_MS
+};
+
+const ciscoSimulation = {
+  podEdge: "Cisco Catalyst IR1800 IOx edge app for local SOS intake and cache",
+  satellite: "LEO satellite / 5G-NTN backhaul represented by the satellite link-node",
+  cellular: "Cisco Meraki MG cellular backhaul represented by CELLTOWER-1 and CELLTOWER-2",
+  mesh: "Cisco URWB pod-to-pod relay path",
+  localWifi: "Meraki MR captive portal for citizens submitting SOS requests",
+  sensors: "Meraki MT style hazard inputs for flood, heat, and earthquake drills"
+};
+
+function normalizeUrl(url) {
+  return String(url || "").trim().replace(/\/+$/, "");
+}
+
+function parseList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseCellTowers(cellTowerValue, connectedTowerValue) {
+  const rawTowers = parseList(cellTowerValue);
+  const names = parseList(connectedTowerValue);
+
+  return rawTowers.map((entry, index) => {
+    const [maybeName, maybeUrl] = entry.includes("=") ? entry.split("=", 2) : [names[index], entry];
+    return {
+      name: maybeName || `CELLTOWER-${index + 1}`,
+      url: normalizeUrl(maybeUrl)
+    };
+  });
+}
+
+function getPodIdentity() {
+  const settings = podSettings.getPodSettings();
+
+  return {
+    podId: podInfo.podId,
+    podName: settings.podName || podInfo.podName,
+    region: podInfo.region
+  };
+}
+
+async function readLinkHealth(url) {
+  try {
+    const response = await axios.get(`${normalizeUrl(url)}/health`, { timeout: 1000 });
+    return response.data?.status || "up";
+  } catch (error) {
+    if (error.response?.data?.status) {
+      return error.response.data.status;
+    }
+    return "down";
+  }
+}
+
+async function readInfraStatus() {
+  try {
+    const response = await axios.get(`${podInfo.simulationControllerUrl}/api/infra/status`, {
+      timeout: 1200
+    });
+    return response.data?.data || {};
+  } catch (error) {
+    return {
+      satellite: "unreachable",
+      celltower1: "unreachable",
+      celltower2: "unreachable"
+    };
+  }
+}
+
+async function buildTowerStatuses() {
+  const towerStatuses = await Promise.all(
+    podInfo.cellTowers.map(async (tower) => ({
+      name: tower.name,
+      url: tower.url,
+      status: await readLinkHealth(tower.url)
+    }))
+  );
+  return towerStatuses;
+}
+
+function summarizeCellular(towerStatuses) {
+  if (towerStatuses.length === 0) {
+    return "not-configured";
+  }
+
+  const upCount = towerStatuses.filter((tower) => tower.status === "up").length;
+  if (upCount === towerStatuses.length) {
+    return "up";
+  }
+  if (upCount > 0) {
+    return "degraded";
+  }
+  return "down";
+}
+
+function cloneHealthSnapshot() {
+  return {
+    ...latestHealthSnapshot,
+    cellTowerStatuses: latestHealthSnapshot.cellTowerStatuses.map((tower) => ({ ...tower }))
+  };
+}
+
+async function pollHealthOnce() {
+  const [satelliteStatus, towerStatuses] = await Promise.all([
+    readLinkHealth(podInfo.satelliteUrl),
+    buildTowerStatuses()
+  ]);
+  const cellularStatus = summarizeCellular(towerStatuses);
+
+  latestHealthSnapshot = {
+    satelliteStatus,
+    cellularStatus,
+    cellTowerStatuses: towerStatuses,
+    checkedAt: new Date().toISOString(),
+    pollIntervalMs: HEALTH_POLL_INTERVAL_MS
+  };
+
+  const nextSignature = JSON.stringify({
+    satelliteStatus,
+    cellularStatus,
+    towers: towerStatuses.map((tower) => `${tower.name}:${tower.status}`)
+  });
+
+  if (nextSignature !== lastHealthSignature) {
+    lastHealthSignature = nextSignature;
+    console.log(
+      `[connectivity] ${podInfo.podId} health poll: satellite=${satelliteStatus}, cellular=${cellularStatus}`
+    );
+  }
+
+  return cloneHealthSnapshot();
+}
+
+async function getHealthSnapshot() {
+  if (!latestHealthSnapshot.checkedAt) {
+    return pollHealthOnce();
+  }
+
+  return cloneHealthSnapshot();
+}
+
+function startHealthPolling() {
+  if (healthPollTimer) {
+    return healthPollTimer;
+  }
+
+  pollHealthOnce().catch((error) => {
+    console.warn(`[connectivity] ${podInfo.podId} initial health poll failed: ${error.message}`);
+  });
+
+  healthPollTimer = setInterval(() => {
+    pollHealthOnce().catch((error) => {
+      console.warn(`[connectivity] ${podInfo.podId} health poll failed: ${error.message}`);
+    });
+  }, HEALTH_POLL_INTERVAL_MS);
+
+  return healthPollTimer;
+}
+
+function islandRoute(base) {
+  return {
+    ...base,
+    mode: "island",
+    activePath: "none",
+    activeLink: null,
+    activeCellTower: null,
+    relayPod: null
+  };
+}
+
+async function findMeshRelay(base) {
+  for (const neighborUrl of podInfo.neighbors) {
+    try {
+      const response = await axios.get(`${neighborUrl}/api/pod/status`, {
+        timeout: 1500,
+        headers: {
+          "x-sanjeevani-probe": "direct"
+        }
+      });
+
+      const neighbor = response.data && response.data.data;
+      if (neighbor && neighbor.mode === "cloud") {
+        return {
+          ...base,
+          mode: "mesh-relay",
+          activePath: "mesh",
+          activeLink: null,
+          activeCellTower: null,
+          relayPod: {
+            url: neighborUrl,
+            podId: neighbor.podId,
+            podName: neighbor.podName,
+            region: neighbor.region,
+            cloudPath: neighbor.activePath,
+            activeCellTower: neighbor.activeCellTower || null
+          }
+        };
+      }
+    } catch (error) {
+      console.warn(
+        `[connectivity] ${podInfo.podId} could not inspect neighbor ${neighborUrl}: ${error.message}`
+      );
+    }
+  }
+
+  return null;
+}
+
+async function calculateMode(options = {}) {
+  const allowMeshRelay = options.allowMeshRelay !== false;
+  const networkState = localQueue.getNetworkState();
+  const healthSnapshot = await getHealthSnapshot();
+  const satelliteStatus = healthSnapshot.satelliteStatus;
+  const towerStatuses = healthSnapshot.cellTowerStatuses;
+  const cellularStatus = healthSnapshot.cellularStatus;
+
+  const base = {
+    satelliteStatus,
+    cellularStatus,
+    cellTowerStatuses: towerStatuses,
+    healthLastCheckedAt: healthSnapshot.checkedAt,
+    healthPollIntervalMs: healthSnapshot.pollIntervalMs,
+    networkState
+  };
+
+  if (networkState.satelliteEnabled && satelliteStatus === "up") {
+    return {
+      ...base,
+      mode: "cloud",
+      activePath: "satellite",
+      activeLink: {
+        name: "satellite",
+        type: "satellite",
+        url: podInfo.satelliteUrl
+      },
+      activeCellTower: null,
+      relayPod: null
+    };
+  }
+
+  if (networkState.cellularEnabled) {
+    const activeTower = towerStatuses.find((tower) => tower.status === "up");
+    if (activeTower) {
+      return {
+        ...base,
+        mode: "cloud",
+        activePath: "cellular",
+        activeLink: {
+          name: activeTower.name,
+          type: "cellular",
+          url: activeTower.url
+        },
+        activeCellTower: activeTower.name,
+        relayPod: null
+      };
+    }
+  }
+
+  if (allowMeshRelay && networkState.meshEnabled && podInfo.neighbors.length > 0) {
+    const relayRoute = await findMeshRelay(base);
+    if (relayRoute) {
+      return relayRoute;
+    }
+  }
+
+  return islandRoute(base);
+}
+
+async function buildPodStatus(options = {}) {
+  const route = await calculateMode(options);
+  const identity = getPodIdentity();
+
+  return {
+    podId: identity.podId,
+    podName: identity.podName,
+    region: identity.region,
+    mode: route.mode,
+    activePath: route.activePath,
+    activeCellTower: route.activeCellTower,
+    relayPod: route.relayPod,
+    satelliteStatus: route.satelliteStatus,
+    cellularStatus: route.cellularStatus,
+    cellTowerStatuses: route.cellTowerStatuses,
+    healthLastCheckedAt: route.healthLastCheckedAt,
+    healthPollIntervalMs: route.healthPollIntervalMs,
+    networkState: route.networkState,
+    queuedRequests: localQueue.getQueueCount(),
+    connectedTowers: podInfo.connectedTowers,
+    neighbors: podInfo.neighbors,
+    ciscoSimulation
+  };
+}
+
+async function forwardViaRoute(route, request) {
+  if (!route.activeLink?.url) {
+    throw new Error("No active link is available for cloud forwarding.");
+  }
+
+  const response = await axios.post(`${route.activeLink.url}/api/forward`, request, {
+    timeout: 2500
+  });
+  return response.data;
+}
+
+async function sendPodAlert(alert) {
+  console.log(`[connectivity] ${podInfo.podId} stored local hazard alert ${alert.id || alert.hazard}`);
+  return { success: true, localOnly: true };
+}
+
+async function sendSecurityEvent(event) {
+  console.log(`[connectivity] ${podInfo.podId} stored local security event ${event.source}`);
+  return { success: true, localOnly: true };
+}
+
+async function sendToRelay(relayUrl, request) {
+  const response = await axios.post(`${normalizeUrl(relayUrl)}/api/relay`, request, {
+    timeout: 3000
+  });
+  return response.data;
+}
+
+async function proxyInfra(path) {
+  const response = await axios({
+    method: path.endsWith("/status") ? "GET" : "POST",
+    url: `${podInfo.simulationControllerUrl}${path}`,
+    timeout: 2500
+  });
+  return response.data;
+}
+
+module.exports = {
+  buildPodStatus,
+  calculateMode,
+  ciscoSimulation,
+  forwardViaRoute,
+  getPodIdentity,
+  getHealthSnapshot,
+  podInfo,
+  pollHealthOnce,
+  proxyInfra,
+  readInfraStatus,
+  sendPodAlert,
+  sendSecurityEvent,
+  sendToRelay,
+  startHealthPolling,
+  setPodName: podSettings.setPodName
+};

@@ -1,130 +1,203 @@
-# SANJEEVANI — POC Simulation
+# SANJEEVANI Docker Pod Network
 
-Docker simulation of the SANJEEVANI resilient disaster management network
-(see `../SANJEEVANI-Idea-and-Architecture.md`). Pods can only reach the
-control center **through** transport containers, so stopping a container
-genuinely kills that path and triggers the failover ladder.
+SANJEEVANI is a Docker simulation of a disaster SOS network with ten local pods, shared satellite/cellular middlemen, mesh relay, and island-mode local caching.
 
-```
-                       ┌─────────────────┐
-                       │  control_center │  EOC dashboard :9000
-                       │  (Redis queue,  │  (Kafka stand-in: Redis Streams,
-                       │  triage, alerts)│   SOS priority lane)
-                       └────────▲────────┘
-              ┌────────────┬────┴───────┬─────────────┐
-        ┌─────┴─────┐ ┌────┴──────┐ ┌───┴───────┐
-        │ satellite │ │cell_tower1│ │cell_tower2│      <- relay containers
-        │   :9101   │ │   :9102   │ │   :9103   │
-        └─────▲─────┘ └────▲──────┘ └───▲───────┘
-          all pods      pod1, pod2    pod3, pod4        <- coverage (see topology.yaml)
-              │             │             │
-        ┌─────┴──────┬──────┴──────┬──────┴──────┬──────────┐
-        │   pod1     │    pod2     │    pod3     │   pod4   │
-        │   :9201    │    :9202    │    :9203    │   :9204  │
-        └────────────┴─────────────┴─────────────┴──────────┘
-             pod1 ↔ pod2 ↔ pod3 ↔ pod4  (URWB mesh, max 2 hops)
+Pods do not post directly to the cloud. A pod must forward through the satellite link-node, a configured cell tower link-node, or a mesh neighbor that still has one of those uplinks. If no path is available, the SOS is stored in that pod's local queue.
+
+## Folder Structure
+
+```text
+.
+|-- docker-compose.yml
+|-- cloud-api/                 # central cloud receiver on port 9000
+|-- link-node/                 # shared satellite and celltower service image
+|-- simulation-controller/     # global Docker stop/start controller on port 9300
+|-- pod-agent/                 # shared pod backend and plain HTML/CSS/JS UI
+|   |-- public/                # citizen/operator frontend
+|   `-- services/              # routing, queue, settings, hazard, triage modules
+|-- integrations/              # optional external demo feeders
+`-- pod-data/                  # generated runtime state, ignored by git
 ```
 
-## Run it
+Removed from the active architecture: the old root `control-center`, old `pod-simulator`, nested pod network folder, duplicate pod agents, relay folder, and React/Vite pod UI.
 
-```bash
-cd sanjeevani
-docker compose up --build          # first build takes a few minutes
-```
-
-| URL | What |
-|---|---|
-| http://localhost:9000 | EOC dashboard (paths, pods, triaged events, Shield security) |
-| http://localhost:9201..9204 | Citizen portals for pod1..pod4 (type or 🎤 speak) |
-| http://localhost:9101/health | Satellite relay health (9102/9103 = towers) |
-
-Optional: `copy .env.example .env` and add a Webex bot token + room id for
-real incident-room posts, and/or an Anthropic key for LLM triage. Without
-them the demo still works (rules-based triage, Webex posts logged).
-
-## Demo storyline (matches the pitch)
-
-**1. Multi-hazard early warning (hazard packs, zero code changes):**
-```bash
-python scripts/replay_flood.py    # rising river at pod1 -> flood pack fires
-python scripts/replay_quake.py    # 0.8 g shock at pod3 -> quake pack fires instantly
-```
-Each trigger flips the pod to disaster mode and broadcasts a **signed** alert
-to every pod (see the green "✓ Verified" banner on the portals).
-
-**2. Citizen triage:** open http://localhost:9201, speak or type
-*"my grandfather needs insulin"* → watch it appear triaged (severity, category,
-reason) on the dashboard; severity ≥ 8 also posts to Webex if configured.
-
-**3. The failover ladder (the showstopper):**
-```powershell
-scripts\demo_failover.ps1          # guided, step by step
-```
-or manually:
-```bash
-curl "http://localhost:9101/set?loss=0.4"   # rain fade -> predictive failover (DEGRADED)
-docker stop satellite                        # satellite dead -> pods on their towers
-docker stop cell_tower_2                     # south tower dead -> pod3/4 go MESH (Tier 1)
-docker stop cell_tower_1                     # everything dead -> ISLAND MODE (Tier 0)
-# submit portal requests now -> "queued offline"
-docker start satellite                       # recovery -> queue drains, events tagged "synced from queue"
-docker start cell_tower_1 cell_tower_2
-curl "http://localhost:9101/set?loss=0"
-```
-
-**4. Shield — the decoy-alert attack is rejected:**
-```bash
-python scripts/inject_forged_alert.py   # forged evacuation order -> HTTP 401 + red security event
-```
-Compare with the dashboard's "Broadcast signed test alert" button (Ed25519-signed → accepted).
-
-## POC → production mapping (for judges)
-
-| In this simulation | In production |
-|---|---|
-| pod-agent container | IOx containers on Cisco Catalyst IR1800 |
-| satellite / cell_tower relay containers | LEO/5G-NTN terminal, Meraki MG cellular via Meraki MX SD-WAN |
-| `/relay` mesh hop between pods | Cisco URWB (Catalyst IW9165/9167) inter-shelter mesh |
-| relay `/health` polling + loss threshold | ThousandEyes path telemetry, predictive failover |
-| Redis Streams (SOS + standard lanes) | Kafka priority topics, partitioned by district |
-| Rules/LLM triage in control-center | Triage microservices on Kubernetes (HPA) |
-| Ed25519-signed alerts, verified at pods | SANJEEVANI-Shield trusted alert pipeline |
-| Webex posts (real API when token set) | Webex incident rooms + Webex Connect SMS blasts |
-| EOC dashboard | Splunk dashboards |
-| `hazard-packs/*.yaml` | Same concept — new disaster = new YAML pack |
-
-Known simplifications: control-center delivers alerts to pods directly
-(production uses the same WAN paths); coverage is declared in
-`topology.yaml` (production: RF planning); mesh is capped at 2 hops.
-
-## Real Cisco device integration (free — turns "simulated" into "live")
-
-`integrations/` contains scripts that talk to **real Cisco products**, not
-stand-ins. Both need a free Cisco DevNet account (https://developer.cisco.com
-→ Sandbox catalog) for credentials:
-
-| Script | Cisco product | What it proves |
-|---|---|---|
-| `meraki_live.py` | Meraki Dashboard API (Always-On sandbox or trial org) | Lists a real org's MR/MS/MX/MT/MV devices mapped to SANJEEVANI roles; pulls **real MT sensor readings**; `--feed-pod http://localhost:9201` pipes a genuine Meraki temperature reading into the hazard engine (`heatwave.yaml` pack) |
-| `catalyst_restconf.py` | Catalyst 8000v, IOS-XE Always-On sandbox | Reads interfaces over RESTCONF; `--configure` pushes a SANJEEVANI-tagged config and reads it back — config-by-code on real IOS-XE, the same mechanism the pod's Catalyst switch would use for VLAN/QoS zero-touch setup |
+## Run
 
 ```powershell
-$env:MERAKI_API_KEY = "<key from DevNet Meraki sandbox page>"
-py -3.13 integrations/meraki_live.py --feed-pod http://localhost:9201
-
-$env:IOSXE_PASS = "<password from DevNet IOS-XE sandbox page>"
-py -3.13 integrations/catalyst_restconf.py --configure
+docker compose up -d --build
 ```
 
-Also already live when configured in `.env`: **Webex** (real rooms/messages)
-and **Claude LLM triage**. Further options for the demo video: **Cisco
-Modeling Labs Free** (5 virtual IOS-XE nodes — build the pod LAN with real
-VLAN/QoS config), **Packet Tracer** (free via NetAcad — visual pod topology),
-**Duo Free** (real MFA on the EOC dashboard, up to 10 users), **ThousandEyes
-trial** (real path telemetry replacing the relay `/health` probes).
+Open:
 
-## Add a new disaster type
+```text
+POD-01 UI:                 http://localhost:8001
+POD-02 UI:                 http://localhost:8002
+...
+POD-10 UI:                 http://localhost:8010
+Cloud API health:          http://localhost:9000/api/health
+Satellite health:          http://localhost:9100/health
+CELLTOWER-1 health:        http://localhost:9201/health
+CELLTOWER-2 health:        http://localhost:9202/health
+Simulation controller UI:  http://localhost:9300
+Simulation controller API: http://localhost:9300/api/infra/status
+```
 
-Drop a YAML file in `pod-agent/hazard-packs/` (sensor, threshold, optional
-trend rule, alert text), `docker compose up --build pod1..pod4` — done.
-That is the multi-hazard architecture in one sentence.
+## Active Services
+
+```text
+cloud-api              stores SOS requests received through link-nodes
+satellite              satellite middleman forwarding to cloud-api
+celltower-1            cellular middleman forwarding to cloud-api
+celltower-2            cellular middleman forwarding to cloud-api
+simulation-controller  stops/starts satellite and cell tower Docker containers
+pod-01..pod-10         local pod SOS app, routing engine, queue, and mesh relay
+```
+
+## 10-Pod Topology
+
+```text
+POD-01: CELLTOWER-1, neighbors POD-02/POD-03
+POD-02: CELLTOWER-1, neighbors POD-01/POD-04
+POD-03: CELLTOWER-1, neighbors POD-01/POD-05
+POD-04: CELLTOWER-1, neighbors POD-02/POD-06
+POD-05: CELLTOWER-1 + CELLTOWER-2, neighbors POD-03/POD-07
+POD-06: CELLTOWER-2, neighbors POD-04/POD-08
+POD-07: CELLTOWER-2, neighbors POD-05/POD-09
+POD-08: CELLTOWER-2, neighbors POD-06/POD-10
+POD-09: no cell tower, neighbors POD-07/POD-10
+POD-10: no cell tower, neighbors POD-08/POD-09
+```
+
+Every pod has satellite configured. Local pod controls can disable satellite/cellular/mesh for only that pod. Global infrastructure controls fail or restore the shared satellite/celltower services for all pods.
+
+## Routing Order
+
+1. Satellite link is enabled locally and globally up: forward to `satellite -> cloud-api`.
+2. Otherwise, cellular is enabled locally and a configured tower is up: forward to `celltower-* -> cloud-api`.
+3. Otherwise, mesh is enabled and a neighbor has cloud route: relay to that neighbor.
+4. Otherwise, cache locally in `pod-data/pod-XX/queue.json`.
+
+## Useful API Commands
+
+Check running containers:
+
+```powershell
+docker compose ps
+```
+
+Check POD-01 status:
+
+```powershell
+curl.exe http://localhost:8001/api/pod/status
+```
+
+Submit an SOS to POD-01:
+
+```powershell
+curl.exe -X POST http://localhost:8001/api/requests -H "Content-Type: application/json" -d "{\"name\":\"Ramesh Kumar\",\"age\":68,\"phone\":\"+91 9876543210\",\"category\":\"Medical\",\"message\":\"My grandfather needs insulin and cannot walk\",\"location\":\"Kothapalli Zone 3\"}"
+```
+
+View cloud-received requests:
+
+```powershell
+curl.exe http://localhost:9000/api/requests
+```
+
+Fail satellite globally through the simulation controller:
+
+```powershell
+curl.exe -X POST http://localhost:9300/api/infra/satellite/fail -H "Content-Type: application/json" -d "{}"
+```
+
+Restore satellite globally through the simulation controller:
+
+```powershell
+curl.exe -X POST http://localhost:9300/api/infra/satellite/restore -H "Content-Type: application/json" -d "{}"
+```
+
+Fail CELLTOWER-1 globally through the simulation controller:
+
+```powershell
+curl.exe -X POST http://localhost:9300/api/infra/celltower-1/fail -H "Content-Type: application/json" -d "{}"
+```
+
+Restore CELLTOWER-1 globally through the simulation controller:
+
+```powershell
+curl.exe -X POST http://localhost:9300/api/infra/celltower-1/restore -H "Content-Type: application/json" -d "{}"
+```
+
+Fail CELLTOWER-2 globally through the simulation controller:
+
+```powershell
+curl.exe -X POST http://localhost:9300/api/infra/celltower-2/fail -H "Content-Type: application/json" -d "{}"
+```
+
+Restore CELLTOWER-2 globally through the simulation controller:
+
+```powershell
+curl.exe -X POST http://localhost:9300/api/infra/celltower-2/restore -H "Content-Type: application/json" -d "{}"
+```
+
+Disable satellite only on POD-01:
+
+```powershell
+curl.exe -X POST http://localhost:8001/api/network/satellite/disable -H "Content-Type: application/json" -d "{}"
+```
+
+Enable satellite only on POD-01:
+
+```powershell
+curl.exe -X POST http://localhost:8001/api/network/satellite/enable -H "Content-Type: application/json" -d "{}"
+```
+
+Disable cellular only on POD-09:
+
+```powershell
+curl.exe -X POST http://localhost:8009/api/network/cellular/disable -H "Content-Type: application/json" -d "{}"
+```
+
+View a pod queue:
+
+```powershell
+curl.exe http://localhost:8001/api/queue
+```
+
+Manually sync a pod queue:
+
+```powershell
+curl.exe -X POST http://localhost:8001/api/sync -H "Content-Type: application/json" -d "{}"
+```
+
+Edit a pod display name:
+
+```powershell
+curl.exe -X POST http://localhost:8001/api/pod/name -H "Content-Type: application/json" -d "{\"podName\":\"Updated Command Pod\"}"
+```
+
+## Demo Scenarios
+
+1. Normal path: keep all links up, submit SOS to POD-01, and verify `forwardedBy` is `satellite` in `http://localhost:9000/api/requests`.
+2. Satellite failover: fail satellite, submit SOS to POD-01, and verify `forwardedBy` is `CELLTOWER-1`.
+3. Dual tower behavior: fail satellite and CELLTOWER-1, then submit to POD-05. It should use `CELLTOWER-2`.
+4. No cellular pod: fail satellite, then submit to POD-09. It should relay by mesh if a neighbor has a cloud path.
+5. Island mode: disable satellite, cellular, and mesh locally on one pod, submit SOS, then check `/api/queue`.
+6. Queue restore: re-enable a path and call `/api/sync`; queued SOS should move to cloud.
+7. Local-only control: disable cellular on POD-01 and check POD-02; POD-02 remains unaffected.
+8. Global control: fail CELLTOWER-1 and check POD-01 through POD-04; all see tower 1 down.
+9. UI path test: open any pod UI, use the global and local controls, and watch the route card update.
+
+## Stop And Reset
+
+Stop containers:
+
+```powershell
+docker compose down
+```
+
+Reset generated queues, pod display names, and local path settings:
+
+```powershell
+Remove-Item -Recurse -Force .\pod-data
+docker compose up -d --build
+```

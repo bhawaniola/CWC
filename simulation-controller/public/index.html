@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SANJEEVANI Simulation Controller</title>
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">SANJEEVANI controller</p>
+        <h1>Global infrastructure control</h1>
+        <p class="subtitle">Stop or start the actual satellite and cell tower Docker containers from one place.</p>
+      </div>
+      <button id="refresh" type="button">Refresh</button>
+    </header>
+
+    <main class="shell">
+      <section class="link-grid" aria-live="polite">
+        <article class="link-card" data-link="satellite">
+          <div>
+            <span>Satellite</span>
+            <strong id="satelliteStatus">-</strong>
+            <small id="satelliteDocker">container: -</small>
+          </div>
+          <div class="actions">
+            <button type="button" data-link-action="fail" data-link-key="satellite">Stop container</button>
+            <button type="button" data-link-action="restore" data-link-key="satellite">Start container</button>
+          </div>
+        </article>
+
+        <article class="link-card" data-link="celltower-1">
+          <div>
+            <span>CELLTOWER-1</span>
+            <strong id="celltower1Status">-</strong>
+            <small id="celltower1Docker">container: -</small>
+          </div>
+          <div class="actions">
+            <button type="button" data-link-action="fail" data-link-key="celltower-1">Stop container</button>
+            <button type="button" data-link-action="restore" data-link-key="celltower-1">Start container</button>
+          </div>
+        </article>
+
+        <article class="link-card" data-link="celltower-2">
+          <div>
+            <span>CELLTOWER-2</span>
+            <strong id="celltower2Status">-</strong>
+            <small id="celltower2Docker">container: -</small>
+          </div>
+          <div class="actions">
+            <button type="button" data-link-action="fail" data-link-key="celltower-2">Stop container</button>
+            <button type="button" data-link-action="restore" data-link-key="celltower-2">Start container</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>Controller API</h2>
+        <pre>GET  /api/infra/status
+POST /api/infra/satellite/fail
+POST /api/infra/satellite/restore
+POST /api/infra/celltower-1/fail
+POST /api/infra/celltower-1/restore
+POST /api/infra/celltower-2/fail
+POST /api/infra/celltower-2/restore</pre>
+      </section>
+
+      <div id="notice" class="notice" role="status"></div>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
