@@ -99,26 +99,7 @@ CELLTOWER-1 covers POD-01, POD-02, POD-03, and POD-05. CELLTOWER-2 covers POD-07
 
 Every pod has satellite configured. Local pod controls can disable satellite/cellular/mesh for only that pod. Global infrastructure controls fail or restore the shared satellite/celltower services for all pods.
 
-## Resilience Upgrades (link physics, Shield, surge protection)
-
-These upgrades answer the "questions.pdf" review (see `essentials/QUESTIONS-ANSWERED.md`)
-and are verified end-to-end by `integrations/integration_test.py` (13 checks, no Docker
-needed — runs the services as local Node processes).
-
-### Link physics + predictive failover (the ThousandEyes idea with one rule)
-
-Every link-node now simulates real transmission physics: it sleeps its latency
-(satellite 80 ms, cellular 30 ms) and drops packets according to its `loss`
-setting. Loss >= 25% makes `/health` report `degraded`.
-
-```powershell
-curl.exe "http://localhost:9100/set?loss=0.4"     # rain fade on the satellite
-curl.exe "http://localhost:9100/set?loss=0"       # weather clears
-```
-
-Pod routing now understands three link states, in strict preference order:
-healthy satellite -> healthy tower -> DEGRADED satellite -> DEGRADED tower ->
-mesh -> island. So when rain fade degrades the satellite, traffic moves to
+## Queue And Routing Order
 
 Every citizen SOS is first accepted by that pod's own backend and stored in that pod's persistent queue at `pod-data/pod-XX/queue.json`. The pod sync worker wakes immediately after submission and also runs every 5 seconds.
 

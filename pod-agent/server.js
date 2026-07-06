@@ -15,6 +15,9 @@ const app = express();
 const PORT = process.env.PORT || 8000;
 const MANAGER_API_KEY = process.env.MANAGER_API_KEY || "sanjeevani-manager-demo-key";
 const GOSSIP_SWEEP_INTERVAL_MS = Number(process.env.GOSSIP_SWEEP_INTERVAL_MS || 2000);
+const COORDINATOR_ROUTES = parseCoordinatorRoutes(
+  process.env.COORDINATOR_INBOXES || process.env.COORDINATOR_ROUTES || ""
+);
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
@@ -88,6 +91,208 @@ function normalizeRequestLanguage(language) {
     nativeName: "English",
     speechLocale: "en-IN"
   };
+}
+
+function normalizeCoordinatorUrl(url) {
+  return String(url || "").trim().replace(/\/+$/, "");
+}
+
+function parseCoordinatorRoutes(value) {
+  return String(value || "")
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .flatMap((entry) => {
+      const [rawRole, rawUrls] = entry.includes("=") ? entry.split("=", 2) : ["all", entry];
+      const role = String(rawRole || "all").trim().toLowerCase();
+      return String(rawUrls || "")
+        .split(",")
+        .map((url) => normalizeCoordinatorUrl(url))
+        .filter(Boolean)
+        .map((url) => ({ role, url }));
+    });
+}
+
+const COORDINATOR_ROLE_MATCHERS = {
+  hospital: {
+    categories: ["medical"],
+    keywords: [
+      "ambulance",
+      "blood",
+      "doctor",
+      "hospital",
+      "icu",
+      "injury",
+      "insulin",
+      "medicine",
+      "oxygen",
+      "patient",
+      "triage"
+    ]
+  },
+  shelter: {
+    categories: ["shelter", "food", "water"],
+    keywords: [
+      "blanket",
+      "camp",
+      "drinking",
+      "food",
+      "meal",
+      "packet",
+      "shelter",
+      "shortage",
+      "tent",
+      "water"
+    ]
+  },
+  workforce: {
+    categories: ["workforce", "volunteer"],
+    keywords: [
+      "assignment",
+      "crew",
+      "delivery",
+      "driver",
+      "shift",
+      "staff",
+      "team",
+      "transport",
+      "volunteer",
+      "worker"
+    ]
+  },
+  fire: {
+    categories: ["fire"],
+    keywords: [
+      "burn",
+      "evacuation",
+      "fire",
+      "flame",
+      "hotspot",
+      "smoke",
+      "sprinkler",
+      "wildfire"
+    ]
+  },
+  flood: {
+    categories: ["flood"],
+    keywords: [
+      "boat",
+      "current",
+      "flood",
+      "life jacket",
+      "marooned",
+      "river",
+      "roof",
+      "stranded",
+      "trapped",
+      "waterlogged"
+    ]
+  }
+};
+
+function requestMatchesCoordinatorRole(role, request) {
+  if (role === "all") {
+    return true;
+  }
+
+  const matcher = COORDINATOR_ROLE_MATCHERS[role];
+  if (!matcher) {
+    return false;
+  }
+
+  const category = String(request.category || "").toLowerCase();
+  if (matcher.categories.includes(category)) {
+    return true;
+  }
+
+  const text = [
+    request.category,
+    request.message,
+    request.location,
+    request.triage?.reason,
+    request.name
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return matcher.keywords.some((keyword) => text.includes(keyword));
+}
+
+function coordinatorTargetsForRequest(request) {
+  const seen = new Set();
+
+  return COORDINATOR_ROUTES.filter((route) => requestMatchesCoordinatorRole(route.role, request)).filter(
+    (route) => {
+      const signature = `${route.role}|${route.url}`;
+      if (seen.has(signature)) {
+        return false;
+      }
+      seen.add(signature);
+      return true;
+    }
+  );
+}
+
+async function postCoordinatorInbox(target, request, route, trigger) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2200);
+  const identity = connectivity.getPodIdentity();
+
+  try {
+    const response = await fetch(`${target.url}/api/coordinator/inbox`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        ...request,
+        source: "nearby-pod-mesh",
+        transport: "direct-pod-mesh",
+        targetRole: target.role,
+        sourcePodId: identity.podId,
+        meshLink: {
+          fromPodId: identity.podId,
+          fromPodName: identity.podName,
+          toCoordinatorUrl: target.url,
+          trigger,
+          sentAt: new Date().toISOString()
+        },
+        network: {
+          ...(request.network || {}),
+          coordinatorNotifyPath: "direct-pod-mesh",
+          coordinatorNotifyRole: target.role,
+          podRouteAtNotify: route?.activePath || "queued"
+        }
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    console.log(
+      `[pod-agent] ${identity.podId} notified ${target.role} coordinator at ${target.url} for ${request.id}`
+    );
+  } catch (error) {
+    console.warn(
+      `[pod-agent] ${identity.podId} could not notify ${target.role} coordinator ${target.url}: ${error.message}`
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function notifyMatchingCoordinators(request, route, trigger) {
+  const targets = coordinatorTargetsForRequest(request);
+  if (targets.length === 0) {
+    return;
+  }
+
+  for (const target of targets) {
+    postCoordinatorInbox(target, request, route, trigger);
+  }
 }
 
 function createRequest(body, route) {
@@ -461,6 +666,7 @@ app.post("/api/requests", rateLimitRequests, async (req, res) => {
   );
 
   const queuedRequest = queueLocal(request, "queued-at-origin-pod");
+  notifyMatchingCoordinators(queuedRequest, route, "origin-submission");
   triggerQueueSync("submission");
 
   return res.status(202).json(
@@ -508,6 +714,7 @@ function acceptMeshInbox(req, res) {
   );
 
   const queuedAtRelay = queueLocal(relayedRequest, "queued-at-mesh-inbox");
+  notifyMatchingCoordinators(queuedAtRelay, relayedRequest.network, "mesh-inbox");
 
   res.status(202).json({
     success: true,

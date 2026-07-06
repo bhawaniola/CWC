@@ -112,6 +112,7 @@ services:
       CONNECTED_TOWERS: CELLTOWER-1
       NEIGHBORS: http://pod-02:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+      COORDINATOR_INBOXES: shelter=http://shelter-a-coordinator:8000
     volumes:
       - ./pod-data/pod-01:/app/data
     networks:
@@ -132,6 +133,7 @@ services:
       CONNECTED_TOWERS: CELLTOWER-1
       NEIGHBORS: http://pod-01:8000,http://pod-03:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+      COORDINATOR_INBOXES: hospital=http://hospital-1-coordinator:8000
     volumes:
       - ./pod-data/pod-02:/app/data
     networks:
@@ -172,6 +174,7 @@ services:
       CONNECTED_TOWERS: ""
       NEIGHBORS: http://pod-05:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+      COORDINATOR_INBOXES: hospital=http://hospital-2-coordinator:8000;shelter=http://shelter-a-coordinator:8000
     volumes:
       - ./pod-data/pod-04:/app/data
     networks:
@@ -192,6 +195,7 @@ services:
       CONNECTED_TOWERS: CELLTOWER-1
       NEIGHBORS: http://pod-04:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+      COORDINATOR_INBOXES: shelter=http://shelter-a-coordinator:8000;fire=http://fire-coordinator:8000
     volumes:
       - ./pod-data/pod-05:/app/data
     networks:
@@ -212,6 +216,7 @@ services:
       CONNECTED_TOWERS: ""
       NEIGHBORS: ""
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+      COORDINATOR_INBOXES: hospital=http://hospital-1-coordinator:8000;shelter=http://shelter-b-coordinator:8000;flood=http://flood-coordinator-1:8000
     volumes:
       - ./pod-data/pod-06:/app/data
     networks:
@@ -232,6 +237,7 @@ services:
       CONNECTED_TOWERS: CELLTOWER-2
       NEIGHBORS: http://pod-09:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+      COORDINATOR_INBOXES: hospital=http://hospital-2-coordinator:8000;workforce=http://workforce-1-coordinator:8000
     volumes:
       - ./pod-data/pod-07:/app/data
     networks:
@@ -252,6 +258,7 @@ services:
       CONNECTED_TOWERS: CELLTOWER-2
       NEIGHBORS: ""
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+      COORDINATOR_INBOXES: shelter=http://shelter-c-coordinator:8000
     volumes:
       - ./pod-data/pod-08:/app/data
     networks:
@@ -272,6 +279,7 @@ services:
       CONNECTED_TOWERS: ""
       NEIGHBORS: http://pod-10:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+      COORDINATOR_INBOXES: shelter=http://shelter-c-coordinator:8000;workforce=http://workforce-2-coordinator:8000;flood=http://flood-coordinator-1:8000
     volumes:
       - ./pod-data/pod-09:/app/data
     networks:
@@ -294,6 +302,204 @@ services:
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./pod-data/pod-10:/app/data
+    networks:
+      - sanjeevani-net
+
+  hospital-1-coordinator:
+    build: ./coordinators
+    container_name: sanjeevani-hospital-1-coordinator
+    depends_on: *pod_dependencies
+    ports:
+      - "8101:8000"
+    environment:
+      COORDINATOR_ID: HOSPITAL-01
+      COORDINATOR_NAME: Hospital 1 Command
+      COORDINATOR_ROLE: hospital
+      COORDINATOR_REGION: Medical North Range
+      COVERAGE_NODES: POD-02,POD-06
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: ""
+      CONNECTED_TOWERS: ""
+      NEIGHBORS: http://pod-02:8000,http://pod-06:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./coordinator-data/hospital-01:/app/data
+    networks:
+      - sanjeevani-net
+
+  hospital-2-coordinator:
+    build: ./coordinators
+    container_name: sanjeevani-hospital-2-coordinator
+    depends_on: *pod_dependencies
+    ports:
+      - "8102:8000"
+    environment:
+      COORDINATOR_ID: HOSPITAL-02
+      COORDINATOR_NAME: Hospital 2 Command
+      COORDINATOR_ROLE: hospital
+      COORDINATOR_REGION: Medical South Range
+      COVERAGE_NODES: POD-04,POD-07
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: ""
+      CONNECTED_TOWERS: ""
+      NEIGHBORS: http://pod-04:8000,http://pod-07:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./coordinator-data/hospital-02:/app/data
+    networks:
+      - sanjeevani-net
+
+  shelter-a-coordinator:
+    build: ./coordinators
+    container_name: sanjeevani-shelter-a-coordinator
+    depends_on: *pod_dependencies
+    ports:
+      - "8103:8000"
+    environment:
+      COORDINATOR_ID: SHELTER-A
+      COORDINATOR_NAME: Shelter A Camp
+      COORDINATOR_ROLE: shelter
+      COORDINATOR_REGION: Shelter West Range
+      COVERAGE_NODES: POD-01,POD-05,POD-04
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: ""
+      CONNECTED_TOWERS: ""
+      NEIGHBORS: http://pod-01:8000,http://pod-05:8000,http://pod-04:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./coordinator-data/shelter-a:/app/data
+    networks:
+      - sanjeevani-net
+
+  shelter-b-coordinator:
+    build: ./coordinators
+    container_name: sanjeevani-shelter-b-coordinator
+    depends_on: *pod_dependencies
+    ports:
+      - "8104:8000"
+    environment:
+      COORDINATOR_ID: SHELTER-B
+      COORDINATOR_NAME: Shelter B Camp
+      COORDINATOR_ROLE: shelter
+      COORDINATOR_REGION: Shelter Ridge Range
+      COVERAGE_NODES: POD-06,CELLTOWER-1
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
+      CONNECTED_TOWERS: CELLTOWER-1
+      NEIGHBORS: http://pod-06:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./coordinator-data/shelter-b:/app/data
+    networks:
+      - sanjeevani-net
+
+  shelter-c-coordinator:
+    build: ./coordinators
+    container_name: sanjeevani-shelter-c-coordinator
+    depends_on: *pod_dependencies
+    ports:
+      - "8105:8000"
+    environment:
+      COORDINATOR_ID: SHELTER-C
+      COORDINATOR_NAME: Shelter C Camp
+      COORDINATOR_ROLE: shelter
+      COORDINATOR_REGION: Shelter East Range
+      COVERAGE_NODES: POD-08,POD-09,CELLTOWER-2
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-2=http://celltower-2:9202
+      CONNECTED_TOWERS: CELLTOWER-2
+      NEIGHBORS: http://pod-08:8000,http://pod-09:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./coordinator-data/shelter-c:/app/data
+    networks:
+      - sanjeevani-net
+
+  workforce-1-coordinator:
+    build: ./coordinators
+    container_name: sanjeevani-workforce-1-coordinator
+    depends_on: *pod_dependencies
+    ports:
+      - "8106:8000"
+    environment:
+      COORDINATOR_ID: WORKFORCE-01
+      COORDINATOR_NAME: Workforce Camp 1
+      COORDINATOR_ROLE: workforce
+      COORDINATOR_REGION: Workforce East Range
+      COVERAGE_NODES: POD-07,CELLTOWER-2
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-2=http://celltower-2:9202
+      CONNECTED_TOWERS: CELLTOWER-2
+      NEIGHBORS: http://pod-07:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./coordinator-data/workforce-01:/app/data
+    networks:
+      - sanjeevani-net
+
+  workforce-2-coordinator:
+    build: ./coordinators
+    container_name: sanjeevani-workforce-2-coordinator
+    depends_on: *pod_dependencies
+    ports:
+      - "8107:8000"
+    environment:
+      COORDINATOR_ID: WORKFORCE-02
+      COORDINATOR_NAME: Workforce Camp 2
+      COORDINATOR_ROLE: workforce
+      COORDINATOR_REGION: Workforce High Ground Range
+      COVERAGE_NODES: POD-09
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: ""
+      CONNECTED_TOWERS: ""
+      NEIGHBORS: http://pod-09:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./coordinator-data/workforce-02:/app/data
+    networks:
+      - sanjeevani-net
+
+  fire-coordinator:
+    build: ./coordinators
+    container_name: sanjeevani-fire-coordinator
+    depends_on: *pod_dependencies
+    ports:
+      - "8108:8000"
+    environment:
+      COORDINATOR_ID: FIRE-01
+      COORDINATOR_NAME: Fire Coordinator
+      COORDINATOR_ROLE: fire
+      COORDINATOR_REGION: Fire Route Range
+      COVERAGE_NODES: POD-05,CELLTOWER-1
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
+      CONNECTED_TOWERS: CELLTOWER-1
+      NEIGHBORS: http://pod-05:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./coordinator-data/fire-01:/app/data
+    networks:
+      - sanjeevani-net
+
+  flood-coordinator-1:
+    build: ./coordinators
+    container_name: sanjeevani-flood-coordinator-1
+    depends_on: *pod_dependencies
+    ports:
+      - "8109:8000"
+    environment:
+      COORDINATOR_ID: FLOOD-01
+      COORDINATOR_NAME: Flood Coordinator 1
+      COORDINATOR_ROLE: flood
+      COORDINATOR_REGION: Flood Rescue Range
+      COVERAGE_NODES: POD-06,POD-09
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWERS: ""
+      CONNECTED_TOWERS: ""
+      NEIGHBORS: http://pod-06:8000,http://pod-09:8000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+    volumes:
+      - ./coordinator-data/flood-01:/app/data
     networks:
       - sanjeevani-net
 
