@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
+const fs = require("fs");
 const path = require("path");
 
 const connectivity = require("./services/connectivityManager");
@@ -15,7 +16,14 @@ const MANAGER_API_KEY = process.env.MANAGER_API_KEY || "sanjeevani-manager-demo-
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+
+const reactBuildPath = path.join(__dirname, "dist");
+const legacyPublicPath = path.join(__dirname, "public");
+const staticPath = fs.existsSync(path.join(reactBuildPath, "index.html"))
+  ? reactBuildPath
+  : legacyPublicPath;
+
+app.use(express.static(staticPath));
 
 const syncWorker = startSyncWorker({
   calculateMode: connectivity.calculateMode,
@@ -37,6 +45,33 @@ function requireManagerAccess(req, res, next) {
   });
 }
 
+function normalizeRequestLanguage(language) {
+  if (language && typeof language === "object") {
+    return {
+      code: language.code || "unknown",
+      name: language.name || language.nativeName || "Unknown",
+      nativeName: language.nativeName || language.name || "Unknown",
+      speechLocale: language.speechLocale || ""
+    };
+  }
+
+  if (typeof language === "string" && language.trim()) {
+    return {
+      code: language.trim(),
+      name: language.trim(),
+      nativeName: language.trim(),
+      speechLocale: ""
+    };
+  }
+
+  return {
+    code: "en",
+    name: "English",
+    nativeName: "English",
+    speechLocale: "en-IN"
+  };
+}
+
 function createRequest(body, route) {
   const identity = connectivity.getPodIdentity();
   const triage = triageRequest({
@@ -54,6 +89,7 @@ function createRequest(body, route) {
     phone: body.phone || "",
     category: triage.category,
     message: body.message || "",
+    language: normalizeRequestLanguage(body.language),
     location: body.location || "",
     triage: {
       severity: triage.severity,
@@ -116,7 +152,7 @@ function responseForRequest(message, request, route) {
 }
 
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+  res.sendFile(path.join(staticPath, "index.html"));
 });
 
 app.get("/api/pod/status", async (req, res) => {

@@ -1,3 +1,14 @@
+FROM node:20-alpine AS frontend-build
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY vite.config.mjs ./
+COPY client ./client
+RUN npm run build
+
 FROM node:20-alpine
 
 WORKDIR /app
@@ -7,7 +18,8 @@ RUN npm install --omit=dev
 
 COPY server.js ./
 COPY services ./services
-COPY public ./public
+COPY --from=frontend-build /app/dist ./dist
+COPY public/assets ./dist/assets
 
 RUN mkdir -p /app/data
 

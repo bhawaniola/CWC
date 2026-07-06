@@ -1,31 +1,65 @@
 const elements = {
   activePath: document.getElementById("activePath"),
-  cellularHealth: document.getElementById("cellularHealth"),
-  cellularState: document.getElementById("cellularState"),
-  infraCelltower1: document.getElementById("infraCelltower1"),
-  infraCelltower2: document.getElementById("infraCelltower2"),
-  infraSatellite: document.getElementById("infraSatellite"),
+  accuracyLabel: document.getElementById("accuracyLabel"),
+  addressInput: document.getElementById("addressInput"),
+  closeMapButton: document.getElementById("closeMapButton"),
+  confirmMapButton: document.getElementById("confirmMapButton"),
   healthPollMeta: document.getElementById("healthPollMeta"),
-  manualSync: document.getElementById("manualSync"),
-  meshDetail: document.getElementById("meshDetail"),
-  meshState: document.getElementById("meshState"),
+  latInput: document.getElementById("latInput"),
+  lngInput: document.getElementById("lngInput"),
+  mapModal: document.getElementById("mapModal"),
+  mapPointInput: document.getElementById("mapPointInput"),
   modeBadge: document.getElementById("modeBadge"),
-  operatorNotice: document.getElementById("operatorNotice"),
-  podHeading: document.getElementById("podHeading"),
+  modalCoordinates: document.getElementById("modalCoordinates"),
+  modalPrecision: document.getElementById("modalPrecision"),
+  modalZoneLabel: document.getElementById("modalZoneLabel"),
+  openMapButton: document.getElementById("openMapButton"),
   podId: document.getElementById("podId"),
-  podName: document.getElementById("podName"),
-  podNameForm: document.getElementById("podNameForm"),
-  podNameInput: document.getElementById("podNameInput"),
-  queuedRequests: document.getElementById("queuedRequests"),
-  refreshStatus: document.getElementById("refreshStatus"),
-  region: document.getElementById("region"),
+  previewPin: document.getElementById("previewPin"),
   requestForm: document.getElementById("requestForm"),
   routeDetail: document.getElementById("routeDetail"),
-  satelliteHealth: document.getElementById("satelliteHealth"),
-  satelliteState: document.getElementById("satelliteState"),
+  selectedCoordinates: document.getElementById("selectedCoordinates"),
+  selectedMapLabel: document.getElementById("selectedMapLabel"),
+  smallMapButton: document.getElementById("smallMapButton"),
   submissionNotice: document.getElementById("submissionNotice"),
-  towerList: document.getElementById("towerList")
+  wideMap: document.getElementById("wideMap"),
+  wideMapPin: document.getElementById("wideMapPin"),
+  zoneSelect: document.getElementById("zoneSelect")
 };
+
+const mapBounds = {
+  north: 17.560000,
+  south: 17.210000,
+  west: 78.260000,
+  east: 78.620000
+};
+
+const mapLocations = [
+  { label: "Pod 1 sector", address: "Hill road settlement near Pod 1", x: 34.7, y: 16.7 },
+  { label: "Pod 2 sector", address: "Central village near Pod 2", x: 55.2, y: 15.8 },
+  { label: "Pod 3 sector", address: "River approach village near Pod 3", x: 74.8, y: 15.7 },
+  { label: "Pod 4 sector", address: "West village near Pod 4", x: 24.1, y: 45.8 },
+  { label: "Pod 5 sector", address: "Central road settlement near Pod 5", x: 38.8, y: 45.3 },
+  { label: "Pod 6 sector", address: "East bridge village near Pod 6", x: 81.0, y: 43.8 },
+  { label: "Pod 7 sector", address: "City edge road near Pod 7", x: 25.2, y: 77.0 },
+  { label: "Pod 8 sector", address: "South central village near Pod 8", x: 45.6, y: 85.0 },
+  { label: "Pod 9 sector", address: "Lower river village near Pod 9", x: 78.2, y: 74.2 },
+  { label: "Pod 10 sector", address: "South floodplain village near Pod 10", x: 77.5, y: 87.4 },
+  { label: "Main Base Center", address: "Main Base Center hill command area", x: 54.0, y: 50.5 },
+  { label: "Shelter Camp A", address: "Shelter Camp A central north road", x: 43.1, y: 27.3 },
+  { label: "Shelter Camp B", address: "Shelter Camp B east connector road", x: 67.3, y: 42.4 },
+  { label: "Shelter Camp C", address: "Shelter Camp C south route", x: 57.1, y: 72.0 },
+  { label: "Hospital 1", address: "Hospital 1 near east highway", x: 77.3, y: 27.0 },
+  { label: "Hospital 2", address: "Hospital 2 near city edge", x: 23.6, y: 65.7 },
+  { label: "Flood prone river edge", address: "Suryaa river flood prone area", x: 92.0, y: 66.0 },
+  { label: "Kothapalli, Zone 3", address: "Kothapalli Zone 3", x: 74.4, y: 41.8 }
+];
+
+let selectedLocation = buildLocation(mapLocations[17].x, mapLocations[17].y);
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
 
 function titleCase(value) {
   return String(value || "")
@@ -34,8 +68,36 @@ function titleCase(value) {
     .join(" ");
 }
 
-function enabledLabel(enabled) {
-  return enabled ? "Enabled" : "Disabled";
+function coordinatesFromPercent(x, y) {
+  const lat = mapBounds.north - (clamp(y, 0, 100) / 100) * (mapBounds.north - mapBounds.south);
+  const lng = mapBounds.west + (clamp(x, 0, 100) / 100) * (mapBounds.east - mapBounds.west);
+  return { lat, lng };
+}
+
+function nearestMapLocation(x, y) {
+  return mapLocations.reduce((nearest, location) => {
+    const distance = Math.hypot(location.x - x, location.y - y);
+    return distance < nearest.distance ? { location, distance } : nearest;
+  }, { location: mapLocations[0], distance: Number.POSITIVE_INFINITY });
+}
+
+function buildLocation(x, y) {
+  const preciseX = Number(clamp(x, 0, 100).toFixed(2));
+  const preciseY = Number(clamp(y, 0, 100).toFixed(2));
+  const nearest = nearestMapLocation(preciseX, preciseY);
+  const coordinates = coordinatesFromPercent(preciseX, preciseY);
+  const metersApprox = Math.round(nearest.distance * 38);
+
+  return {
+    label: nearest.location.label,
+    address: nearest.location.address,
+    x: preciseX,
+    y: preciseY,
+    lat: Number(coordinates.lat.toFixed(6)),
+    lng: Number(coordinates.lng.toFixed(6)),
+    precision: `Click locked at X ${preciseX.toFixed(2)}%, Y ${preciseY.toFixed(2)}%`,
+    nearestDistanceMeters: metersApprox
+  };
 }
 
 function setBusy(button, busy) {
@@ -44,30 +106,18 @@ function setBusy(button, busy) {
   }
 }
 
-function setNotice(target, kind, title, details) {
-  if (!target) {
-    return;
-  }
-
-  const compact = target.classList.contains("compact");
-  target.className = `notice ${kind || "ready"}${compact ? " compact" : ""}`;
-  target.innerHTML = "";
+function setNotice(kind, title, details) {
+  elements.submissionNotice.className = `notice ${kind || "ready"}`;
+  elements.submissionNotice.innerHTML = "";
 
   const strong = document.createElement("strong");
   strong.textContent = title;
-  target.appendChild(strong);
+  elements.submissionNotice.appendChild(strong);
 
   if (details) {
     const span = document.createElement("span");
     span.textContent = details;
-    target.appendChild(span);
-  }
-}
-
-function setCardState(selector, state) {
-  const card = document.querySelector(selector);
-  if (card) {
-    card.dataset.state = state;
+    elements.submissionNotice.appendChild(span);
   }
 }
 
@@ -88,157 +138,105 @@ async function api(path, options = {}) {
 
 function describeRoute(status) {
   if (status.mode === "cloud" && status.activePath === "satellite") {
-    return "Forwarding through satellite link-node to cloud-api";
+    return "Satellite path available";
   }
-
   if (status.mode === "cloud" && status.activePath === "cellular") {
-    return `Forwarding through ${status.activeCellTower || "cell tower"} to cloud-api`;
+    return `${status.activeCellTower || "Cellular"} path available`;
   }
-
   if (status.mode === "mesh-relay" && status.relayPod) {
-    const relayPath = status.relayPod.activeCellTower || status.relayPod.cloudPath || "cloud path";
-    return `Relaying to ${status.relayPod.podId}, then ${relayPath}`;
+    return `Mesh relay through ${status.relayPod.podId}`;
   }
-
-  return "Island mode active. SOS requests will be cached locally.";
-}
-
-function renderTowerList(status) {
-  elements.towerList.innerHTML = "";
-
-  if (!status.cellTowerStatuses || status.cellTowerStatuses.length === 0) {
-    const item = document.createElement("span");
-    item.className = "tower-chip muted";
-    item.textContent = "No cell tower assigned to this pod";
-    elements.towerList.appendChild(item);
-    return;
-  }
-
-  for (const tower of status.cellTowerStatuses) {
-    const item = document.createElement("span");
-    item.className = "tower-chip";
-    item.dataset.state = tower.status;
-    item.textContent = `${tower.name}: ${tower.status}`;
-    elements.towerList.appendChild(item);
-  }
+  return "Offline resilient mode";
 }
 
 function renderStatus(status) {
-  elements.podId.textContent = status.podId;
-  elements.podName.textContent = status.podName;
-  elements.podHeading.textContent = `${status.podName} SOS intake`;
-  elements.region.textContent = status.region;
-  elements.queuedRequests.textContent = status.queuedRequests;
-
-  if (document.activeElement !== elements.podNameInput) {
-    elements.podNameInput.value = status.podName;
-  }
-
-  const modeLabel =
-    status.mode === "cloud" ? "Cloud online" : status.mode === "mesh-relay" ? "Mesh relay" : "Island mode";
-  elements.modeBadge.textContent = modeLabel;
-  elements.modeBadge.className = `mode-badge ${status.mode}`;
+  elements.podId.textContent = status.podId || "Pod: -";
+  elements.modeBadge.textContent = status.mode === "cloud" ? "Offline Resilient" : status.mode === "mesh-relay" ? "Mesh Relay" : "Saved Locally";
+  elements.modeBadge.dataset.mode = status.mode;
   elements.activePath.textContent = `Path: ${titleCase(status.activePath)}`;
   elements.routeDetail.textContent = describeRoute(status);
-
-  elements.satelliteState.textContent = enabledLabel(status.networkState.satelliteEnabled);
-  elements.cellularState.textContent = enabledLabel(status.networkState.cellularEnabled);
-  elements.meshState.textContent = enabledLabel(status.networkState.meshEnabled);
-  elements.satelliteHealth.textContent = `health: ${status.satelliteStatus}`;
-  elements.cellularHealth.textContent = `health: ${status.cellularStatus}`;
-  elements.meshDetail.textContent = `neighbors: ${status.neighbors.length}`;
   elements.healthPollMeta.textContent = status.healthLastCheckedAt
-    ? `Health poll: every ${Math.round(status.healthPollIntervalMs / 1000)}s, last checked ${new Date(
-        status.healthLastCheckedAt
-      ).toLocaleTimeString()}`
-    : "Health poll: waiting";
-
-  setCardState('[data-path-card="satellite"]', status.networkState.satelliteEnabled ? "enabled" : "disabled");
-  setCardState('[data-path-card="cellular"]', status.networkState.cellularEnabled ? "enabled" : "disabled");
-  setCardState('[data-path-card="mesh"]', status.networkState.meshEnabled ? "enabled" : "disabled");
-  renderTowerList(status);
-}
-
-function renderInfra(infra) {
-  const data = infra.data || infra;
-  elements.infraSatellite.textContent = data.satellite || "unknown";
-  elements.infraCelltower1.textContent = data.celltower1 || "unknown";
-  elements.infraCelltower2.textContent = data.celltower2 || "unknown";
-  setCardState('[data-infra-card="satellite"]', data.satellite || "unknown");
-  setCardState('[data-infra-card="celltower1"]', data.celltower1 || "unknown");
-  setCardState('[data-infra-card="celltower2"]', data.celltower2 || "unknown");
+    ? `Links checked every ${Math.round(status.healthPollIntervalMs / 1000)} sec`
+    : "Checking links";
 }
 
 async function loadStatus() {
-  const [status, infra] = await Promise.all([api("/api/pod/status"), api("/api/infra/status")]);
+  const status = await api("/api/pod/status");
   renderStatus(status.data);
-  renderInfra(infra);
   return status.data;
 }
 
-elements.refreshStatus.addEventListener("click", async () => {
-  setBusy(elements.refreshStatus, true);
-  try {
-    await loadStatus();
-    setNotice(elements.operatorNotice, "success", "Status refreshed.", "Current route and infrastructure state are up to date.");
-  } catch (error) {
-    setNotice(elements.operatorNotice, "error", "Status refresh failed.", error.message);
-  } finally {
-    setBusy(elements.refreshStatus, false);
+function renderSelectedLocation(location) {
+  selectedLocation = location;
+  const coordText = `Lat ${location.lat.toFixed(6)}, Long ${location.lng.toFixed(6)}`;
+
+  elements.selectedMapLabel.textContent = location.label;
+  elements.selectedCoordinates.textContent = coordText;
+  elements.accuracyLabel.textContent = `Location accurate within nearest ${location.nearestDistanceMeters} m map sector`;
+  elements.mapPointInput.value = location.label;
+  elements.latInput.value = location.lat.toFixed(6);
+  elements.lngInput.value = location.lng.toFixed(6);
+  elements.modalZoneLabel.textContent = location.label;
+  elements.modalCoordinates.textContent = coordText;
+  elements.modalPrecision.textContent = location.precision;
+  elements.previewPin.style.left = `${location.x}%`;
+  elements.previewPin.style.top = `${location.y}%`;
+  elements.wideMapPin.style.left = `${location.x}%`;
+  elements.wideMapPin.style.top = `${location.y}%`;
+
+  if (!elements.addressInput.value.trim() || elements.addressInput.dataset.autoFilled === "true") {
+    elements.addressInput.value = location.address;
+    elements.addressInput.dataset.autoFilled = "true";
+  }
+
+  if (![...elements.zoneSelect.options].some((option) => option.value === location.label)) {
+    elements.zoneSelect.add(new Option(location.label, location.label));
+  }
+  elements.zoneSelect.value = location.label;
+}
+
+function locationFromMapEvent(event, target) {
+  const rect = target.getBoundingClientRect();
+  const x = ((event.clientX - rect.left) / rect.width) * 100;
+  const y = ((event.clientY - rect.top) / rect.height) * 100;
+  return buildLocation(x, y);
+}
+
+function openMapModal() {
+  elements.mapModal.classList.add("open");
+  elements.mapModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+}
+
+function closeMapModal() {
+  elements.mapModal.classList.remove("open");
+  elements.mapModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+}
+
+elements.addressInput.addEventListener("input", () => {
+  elements.addressInput.dataset.autoFilled = "false";
+});
+
+elements.openMapButton.addEventListener("click", openMapModal);
+elements.smallMapButton.addEventListener("click", openMapModal);
+elements.closeMapButton.addEventListener("click", closeMapModal);
+elements.confirmMapButton.addEventListener("click", closeMapModal);
+
+elements.mapModal.addEventListener("click", (event) => {
+  if (event.target === elements.mapModal) {
+    closeMapModal();
   }
 });
 
-elements.podNameForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const button = elements.podNameForm.querySelector("button");
-  setBusy(button, true);
-
-  try {
-    const result = await api("/api/pod/name", {
-      method: "POST",
-      body: JSON.stringify({ podName: elements.podNameInput.value })
-    });
-    renderStatus(result.data);
-    setNotice(elements.operatorNotice, "success", "Pod name saved.", `${result.data.podId} now displays as ${result.data.podName}.`);
-  } catch (error) {
-    setNotice(elements.operatorNotice, "error", "Could not save pod name.", error.message);
-  } finally {
-    setBusy(button, false);
-  }
+elements.wideMap.addEventListener("click", (event) => {
+  renderSelectedLocation(locationFromMapEvent(event, elements.wideMap));
 });
 
-elements.manualSync.addEventListener("click", async () => {
-  setBusy(elements.manualSync, true);
-  try {
-    const result = await api("/api/sync", { method: "POST", body: "{}" });
-    await loadStatus();
-    setNotice(elements.operatorNotice, result.failed ? "warning" : "success", "Manual sync finished.", result.message);
-  } catch (error) {
-    setNotice(elements.operatorNotice, "error", "Manual sync failed.", error.message);
-  } finally {
-    setBusy(elements.manualSync, false);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeMapModal();
   }
-});
-
-document.querySelectorAll("[data-network-path]").forEach((button) => {
-  button.addEventListener("click", async () => {
-    const pathName = button.dataset.networkPath;
-    const action = button.dataset.networkState;
-    setBusy(button, true);
-
-    try {
-      const result = await api(`/api/network/${pathName}/${action}`, {
-        method: "POST",
-        body: "{}"
-      });
-      await loadStatus();
-      setNotice(elements.operatorNotice, "success", `${titleCase(pathName)} ${action}d.`, result.message);
-    } catch (error) {
-      setNotice(elements.operatorNotice, "error", "Network change failed.", error.message);
-    } finally {
-      setBusy(button, false);
-    }
-  });
 });
 
 elements.requestForm.addEventListener("submit", async (event) => {
@@ -249,9 +247,10 @@ elements.requestForm.addEventListener("submit", async (event) => {
   const formData = new FormData(elements.requestForm);
   const payload = Object.fromEntries(formData.entries());
   payload.age = payload.age ? Number(payload.age) : null;
+  payload.location = `${payload.location} | Zone: ${payload.zone} | Map: ${payload.mapPoint} | Lat ${payload.lat}, Long ${payload.lng}`;
 
   try {
-    setNotice(elements.submissionNotice, "warning", "Sending SOS request...", "The pod is selecting the best available route.");
+    setNotice("warning", "Sending request...", "Please keep this page open until confirmation appears.");
     const result = await api("/api/requests", {
       method: "POST",
       body: JSON.stringify(payload)
@@ -259,21 +258,23 @@ elements.requestForm.addEventListener("submit", async (event) => {
     await loadStatus();
 
     const request = result.data.request;
-    const details = `SOS ${request.id} | ${request.syncStatus} | Priority ${request.triage.priority} | ${result.message}`;
-    setNotice(elements.submissionNotice, "success", "SOS request accepted.", details);
+    setNotice(
+      "success",
+      "Request submitted.",
+      `${request.syncStatus} via ${titleCase(result.data.activePath)}. Request ID: ${request.id}`
+    );
   } catch (error) {
-    setNotice(elements.submissionNotice, "error", "SOS submission failed.", error.message);
+    setNotice("error", "Submission failed.", error.message);
   } finally {
     setBusy(submitButton, false);
   }
 });
 
+renderSelectedLocation(selectedLocation);
 loadStatus().catch((error) => {
-  setNotice(elements.submissionNotice, "error", "Pod status unavailable.", error.message);
+  setNotice("error", "Pod status unavailable.", error.message);
 });
 
 setInterval(() => {
-  loadStatus().catch(() => {
-    // Keep the current UI visible during transient network changes.
-  });
+  loadStatus().catch(() => {});
 }, 5000);

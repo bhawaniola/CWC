@@ -3,155 +3,176 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SANJEEVANI Pod SOS</title>
+    <title>SANJEEVANI SOS</title>
     <link rel="stylesheet" href="/style.css">
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">SANJEEVANI local Wi-Fi</p>
-        <h1 id="podHeading">Emergency SOS intake</h1>
-        <p class="subtitle">Requests are triaged locally, then routed through satellite, cellular, mesh relay, or queued safely in island mode.</p>
+    <header class="top-nav">
+      <div class="brand">
+        <span class="brand-symbol" aria-hidden="true"></span>
+        <div>
+          <strong>SANJEEVANI</strong>
+          <span>Self-Healing Lifeline Network</span>
+        </div>
       </div>
-      <div class="status-tile mode-tile" aria-live="polite">
-        <span id="modeBadge" class="mode-badge">Checking</span>
-        <strong id="activePath">Path: checking</strong>
-        <span id="routeDetail">Route detail loading</span>
-      </div>
+      <nav class="top-actions" aria-label="Utility links">
+        <span>English</span>
+        <span><strong>Emergency Help</strong> 1077</span>
+        <span>Powering Resilience. Saving Lives.</span>
+      </nav>
     </header>
 
-    <main class="layout">
-      <section class="panel sos-panel" aria-labelledby="sosTitle">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Citizen request</p>
-            <h2 id="sosTitle">Send an SOS to this pod</h2>
-          </div>
-          <span id="podId" class="pill">-</span>
-        </div>
+    <main class="page-shell">
+      <section class="resilience-banner" aria-live="polite">
+        <strong>Works even when internet is unstable</strong>
+        <span>Requests are saved and sent as soon as a connection is available.</span>
+        <em id="modeBadge">Checking route</em>
+      </section>
 
-        <form id="requestForm" class="request-form">
-          <label>
-            Name
-            <input name="name" type="text" value="Ramesh Kumar" autocomplete="name" required>
+      <section class="hero-card">
+        <div class="hero-copy">
+          <h1>Connect. Report. Get Help.</h1>
+          <p>SANJEEVANI connects you to the right help, at the right time. Your request can save a life.</p>
+          <div class="hero-points">
+            <span><strong>Fast Response</strong> Local pod routing</span>
+            <span><strong>Trusted Network</strong> Verified shelters and teams</span>
+            <span><strong>For Everyone</strong> Simple. Safe. Private.</span>
+          </div>
+        </div>
+        <div class="hero-visual" aria-hidden="true"></div>
+      </section>
+
+      <section class="workspace-grid">
+        <form id="requestForm" class="request-card">
+          <div class="card-heading">
+            <span class="section-icon">SOS</span>
+            <h2>Create an Emergency Request</h2>
+          </div>
+
+          <div class="field-row four-cols">
+            <label>
+              Full Name <b>*</b>
+              <input name="name" type="text" value="Ramesh Kumar" autocomplete="name" required>
+            </label>
+            <label>
+              Age <b>*</b>
+              <input name="age" type="number" min="0" value="68" inputmode="numeric" required>
+            </label>
+            <label>
+              Phone <b>*</b>
+              <input name="phone" type="tel" value="+91 9876543210" autocomplete="tel" required>
+            </label>
+            <label>
+              Shelter / Zone <b>*</b>
+              <select id="zoneSelect" name="zone" required>
+                <option>Kothapalli, Zone 3</option>
+                <option>Pod 1 sector</option>
+                <option>Pod 5 sector</option>
+                <option>River floodplain</option>
+                <option>Main Base Center</option>
+              </select>
+            </label>
+          </div>
+
+          <fieldset class="category-picker">
+            <legend>Category <span>(Select the most relevant)</span></legend>
+            <label><input type="radio" name="category" value="Medical" checked><span>Medical</span></label>
+            <label><input type="radio" name="category" value="Rescue"><span>Rescue</span></label>
+            <label><input type="radio" name="category" value="Food"><span>Food</span></label>
+            <label><input type="radio" name="category" value="Water"><span>Water</span></label>
+            <label><input type="radio" name="category" value="Shelter"><span>Shelter</span></label>
+          </fieldset>
+
+          <label class="full-field">
+            Actual address <b>*</b>
+            <input id="addressInput" name="location" type="text" value="Kothapalli Zone 3" autocomplete="street-address" required>
           </label>
-          <label>
-            Age
-            <input name="age" type="number" min="0" value="68" inputmode="numeric">
+
+          <label class="full-field">
+            Tell us more about your emergency <b>*</b>
+            <textarea name="message" rows="5" maxlength="500" required>My grandfather needs insulin and cannot walk</textarea>
           </label>
-          <label>
-            Phone
-            <input name="phone" type="tel" value="+91 9876543210" autocomplete="tel">
-          </label>
-          <label>
-            Need
-            <select name="category">
-              <option>Medical</option>
-              <option>Rescue</option>
-              <option>Food</option>
-              <option>Water</option>
-              <option>Shelter</option>
-              <option>Other</option>
-            </select>
-          </label>
-          <label class="full">
-            Location
-            <input name="location" type="text" value="Kothapalli Zone 3" autocomplete="street-address" required>
-          </label>
-          <label class="full">
-            SOS message
-            <textarea name="message" rows="6" required>My grandfather needs insulin and cannot walk</textarea>
-          </label>
-          <button class="primary" type="submit">Send SOS</button>
+
+          <input id="mapPointInput" name="mapPoint" type="hidden" value="Kothapalli, Zone 3">
+          <input id="latInput" name="lat" type="hidden" value="17.432100">
+          <input id="lngInput" name="lng" type="hidden" value="78.392100">
+
+          <div class="submit-row">
+            <button class="primary" type="submit">Submit Request</button>
+            <span>Your information is safe and confidential.</span>
+          </div>
+
+          <div id="submissionNotice" class="notice ready" role="status">
+            <strong>Ready.</strong>
+            <span>Select an accurate map point or type the address, then submit your request.</span>
+          </div>
         </form>
 
-        <div id="submissionNotice" class="notice ready" role="status">
-          <strong>Ready.</strong>
-          <span>Submit a request to watch the current network route being used.</span>
-        </div>
+        <aside class="side-column">
+          <section class="location-card">
+            <div class="location-heading">
+              <div>
+                <span class="section-icon green">LOC</span>
+                <strong>Your Location</strong>
+              </div>
+              <button id="openMapButton" type="button">Change Location</button>
+            </div>
+            <div class="location-content">
+              <div>
+                <h3 id="selectedMapLabel">Kothapalli, Zone 3</h3>
+                <p id="selectedCoordinates">Lat 17.432100, Long 78.392100</p>
+                <span id="accuracyLabel" class="accurate">High accuracy point selected</span>
+              </div>
+              <button id="smallMapButton" class="small-map" type="button" aria-label="Open accurate map selector">
+                <img src="/sanjeevani-map.png" alt="SANJEEVANI map preview">
+                <span id="previewPin" class="map-pin" aria-hidden="true"></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="route-card">
+            <strong id="activePath">Path: checking</strong>
+            <span id="routeDetail">Route loading</span>
+            <span id="podId">Pod: -</span>
+            <span id="healthPollMeta">Links checking</span>
+          </section>
+        </aside>
       </section>
 
-      <aside class="rail">
-        <section class="panel identity-panel" aria-labelledby="podTitle">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Current pod</p>
-              <h2 id="podTitle">Local identity</h2>
-            </div>
-            <button id="refreshStatus" type="button">Refresh</button>
-          </div>
-          <dl class="facts">
-            <div><dt>Display name</dt><dd id="podName">-</dd></div>
-            <div><dt>Region</dt><dd id="region">-</dd></div>
-            <div><dt>Queued SOS</dt><dd id="queuedRequests">0</dd></div>
-          </dl>
-          <form id="podNameForm" class="inline-form">
-            <label>
-              Edit display name
-              <input id="podNameInput" name="podName" type="text" maxlength="80" placeholder="Pod display name">
-            </label>
-            <button type="submit">Save</button>
-          </form>
-        </section>
-
-        <section class="panel" aria-labelledby="infraTitle">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Global infrastructure</p>
-              <h2 id="infraTitle">Backhaul links</h2>
-            </div>
-          </div>
-          <div class="path-grid">
-            <article class="path-card" data-infra-card="satellite"><span>Satellite</span><strong id="infraSatellite">-</strong></article>
-            <article class="path-card" data-infra-card="celltower1"><span>CELLTOWER-1</span><strong id="infraCelltower1">-</strong></article>
-            <article class="path-card" data-infra-card="celltower2"><span>CELLTOWER-2</span><strong id="infraCelltower2">-</strong></article>
-          </div>
-          <a class="controller-link" href="http://localhost:9300">Open simulation controller</a>
-        </section>
-      </aside>
-
-      <section class="panel full-width" aria-labelledby="networkTitle">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Local routing policy</p>
-            <h2 id="networkTitle">This pod's enabled paths</h2>
-          </div>
-          <button id="manualSync" type="button">Sync queue</button>
-        </div>
-        <div class="route-board">
-          <article class="route-card" data-path-card="satellite">
-            <span>Satellite permission</span>
-            <strong id="satelliteState">-</strong>
-            <small id="satelliteHealth">health: -</small>
-            <div class="mini-actions">
-              <button type="button" data-network-path="satellite" data-network-state="disable">Disable</button>
-              <button type="button" data-network-path="satellite" data-network-state="enable">Enable</button>
-            </div>
-          </article>
-          <article class="route-card" data-path-card="cellular">
-            <span>Cellular permission</span>
-            <strong id="cellularState">-</strong>
-            <small id="cellularHealth">health: -</small>
-            <div class="mini-actions">
-              <button type="button" data-network-path="cellular" data-network-state="disable">Disable</button>
-              <button type="button" data-network-path="cellular" data-network-state="enable">Enable</button>
-            </div>
-          </article>
-          <article class="route-card" data-path-card="mesh">
-            <span>Mesh permission</span>
-            <strong id="meshState">-</strong>
-            <small id="meshDetail">neighbors: -</small>
-            <div class="mini-actions">
-              <button type="button" data-network-path="mesh" data-network-state="disable">Disable</button>
-              <button type="button" data-network-path="mesh" data-network-state="enable">Enable</button>
-            </div>
-          </article>
-        </div>
-        <div class="tower-list" id="towerList"></div>
-        <p class="health-meta" id="healthPollMeta">Health poll: waiting</p>
-        <div id="operatorNotice" class="notice compact" role="status"></div>
+      <section class="trust-footer">
+        <span>Requests monitored 24/7</span>
+        <span>Verified responders and shelters</span>
+        <span>Privacy first</span>
+        <span>Together, we build resilient communities</span>
       </section>
     </main>
+
+    <div id="mapModal" class="map-modal" aria-hidden="true">
+      <div class="map-dialog" role="dialog" aria-modal="true" aria-labelledby="mapTitle">
+        <div class="map-dialog-head">
+          <div>
+            <p class="eyebrow">Accurate location selection</p>
+            <h2 id="mapTitle">Select exact position on map</h2>
+          </div>
+          <button id="closeMapButton" type="button" aria-label="Close map selector">Close</button>
+        </div>
+        <div class="wide-map-layout">
+          <button id="wideMap" class="wide-map" type="button" aria-label="Choose exact map point">
+            <img src="/sanjeevani-map.png" alt="Wide SANJEEVANI response map">
+            <span id="wideMapPin" class="map-pin" aria-hidden="true"></span>
+          </button>
+          <aside class="map-readout">
+            <span>Selected zone</span>
+            <strong id="modalZoneLabel">Kothapalli, Zone 3</strong>
+            <span>Relative coordinates</span>
+            <strong id="modalCoordinates">Lat 17.432100, Long 78.392100</strong>
+            <span>Map precision</span>
+            <strong id="modalPrecision">Click point locked to 0.01% map precision</strong>
+            <button id="confirmMapButton" class="primary" type="button">Use This Location</button>
+          </aside>
+        </div>
+      </div>
+    </div>
 
     <script src="/app.js"></script>
   </body>
