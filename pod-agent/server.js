@@ -7,6 +7,7 @@ const path = require("path");
 const connectivity = require("./services/connectivityManager");
 const localQueue = require("./services/localQueue");
 const hazardPacks = require("./services/hazardPackService");
+const gossipRouter = require("./services/gossipRouter");
 const { startSyncWorker } = require("./services/syncWorker");
 const { triageRequest } = require("./services/triageService");
 
@@ -227,6 +228,19 @@ app.get("/api/pod/relay-candidate", async (req, res) => {
     success: true,
     data: candidate
   });
+});
+
+
+
+// Dynamic Gossip Protocol Endpoint
+app.get("/api/gossip", async (req, res) => {
+  const status = await connectivity.buildPodStatus({
+    allowMeshRelay: false,
+    forceRefresh: false,
+    maxAgeMs: 5000
+  });
+  const gossipData = gossipRouter.getMyGossipData(status.mode);
+  res.json(gossipData);
 });
 
 app.get("/api/pod/status", async (req, res) => {
@@ -563,3 +577,9 @@ app.listen(PORT, () => {
   );
   console.log(`[pod-agent] neighbors: ${connectivity.podInfo.neighbors.join(", ") || "none"}`);
 });
+
+
+// Start the dynamic background sweeper every 0.5 seconds
+setInterval(() => {
+  gossipRouter.sweepNetwork();
+}, 500);

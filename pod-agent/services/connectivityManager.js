@@ -1,6 +1,7 @@
 const axios = require("axios");
 const localQueue = require("./localQueue");
 const podSettings = require("./podSettings");
+const gossipRouter = require("./gossipRouter");
 
 const podInfo = {
   podId: process.env.POD_ID || "POD-LOCAL",
@@ -332,18 +333,29 @@ async function inspectNeighborForRelay(neighborUrl, base) {
   }
 }
 
-async function findMeshRelay(base) {
-  const relayPods = buildMeshRelayPods();
 
-  if (relayPods.length === 0) {
-    return null;
+async function findMeshRelay(base) {
+  // 1. Ask our custom Gossip Router for the mathematically shortest path
+  const bestDynamicNeighbor = gossipRouter.getBestDynamicNeighbor();
+
+  // 2. If no one is alive around us, we are officially an offline island
+  if (!bestDynamicNeighbor) {
+    return null; 
   }
 
   console.log(
-    `[connectivity] ${podInfo.podId} using direct pod-mesh links to ${relayPods
-      .map((pod) => pod.podId)
-      .join(", ")}`
+    `[connectivity] ${podInfo.podId} ALGORITHM SELECTED ${bestDynamicNeighbor.podId} as optimal mesh relay (${bestDynamicNeighbor.hopsToCloud} hops to cloud)`
   );
+
+  // 3. Format the data so the rest of Pranav's app still understands it
+  const relayPodFormat = {
+    url: bestDynamicNeighbor.url,
+    podId: bestDynamicNeighbor.podId,
+    podName: bestDynamicNeighbor.podId,
+    region: "dynamic-mesh",
+    cloudPath: "dynamic",
+    activeCellTower: null
+  };
 
   return {
     ...base,
@@ -351,10 +363,11 @@ async function findMeshRelay(base) {
     activePath: "mesh",
     activeLink: null,
     activeCellTower: null,
-    relayPod: relayPods[0],
-    relayPods
+    relayPod: relayPodFormat,
+    relayPods: [relayPodFormat]
   };
 }
+
 
 async function calculateMode(options = {}) {
   const allowMeshRelay = options.allowMeshRelay !== false;
