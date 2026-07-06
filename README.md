@@ -31,7 +31,8 @@ docker compose up -d --build
 Open:
 
 ```text
-POD-01 UI:                 http://localhost:8001
+Command Center (EOC):      http://localhost:9400      <-- START HERE
+POD-01 UI (citizen SOS):   http://localhost:8001
 POD-02 UI:                 http://localhost:8002
 ...
 POD-10 UI:                 http://localhost:8010
@@ -46,6 +47,7 @@ Simulation controller API: http://localhost:9300/api/infra/status
 ## Active Services
 
 ```text
+command-center         EOC dashboard aggregating the whole network (port 9400)
 cloud-api              stores SOS requests received through link-nodes
 satellite              satellite middleman forwarding to cloud-api
 celltower-1            cellular middleman forwarding to cloud-api
@@ -53,6 +55,30 @@ celltower-2            cellular middleman forwarding to cloud-api
 simulation-controller  stops/starts satellite and cell tower Docker containers
 pod-01..pod-10         local pod SOS app, routing engine, queue, and mesh relay
 ```
+
+## Command Center (EOC dashboard) — http://localhost:9400
+
+A single operator dashboard built to match the design mockups in `images/`.
+It is a plain HTML/CSS/vanilla-JS app (no build step) served by a small Node
+aggregator that fans out to the cloud-api, the simulation-controller, and all
+ten pods, then refreshes every 5 seconds. Five hash-linked pages:
+
+- **Dashboard** — KPI cards (active/critical requests, pods online, current
+  mode), live emergency requests, pod network status, early-warning + activity
+  feeds. All real, from the cluster.
+- **Requests** — the full triaged citizen-SOS list from the cloud-api.
+- **Network** — live topology, the QoS class table, a live pod-route table,
+  and **simulation controls that really fail/restore the satellite and cell
+  tower containers** (proxied to the simulation-controller). Fail a link and
+  watch the pod table reroute.
+- **Resources** — relief-operations view (resources, volunteers, forecasts).
+  Clearly labelled `representative data` — pod-level resource tracking is a
+  planned feature (see `essentials/COMMUNICATION-PLAN.md`, Phase 4).
+- **Alerts** — signed-alert broadcast box (Ed25519 via the cloud) and the
+  Shield security-event log.
+
+The two audiences are cleanly separated: **citizens** use the pod SOS pages
+(8001-8010); **the EOC operator** uses the command center (9400).
 
 ## 10-Pod Topology
 
@@ -203,10 +229,9 @@ Edit a pod display name:
 curl.exe -X POST http://localhost:8001/api/pod/name -H "Content-Type: application/json" -d "{\"podName\":\"Updated Command Pod\"}"
 ```
 
-## Improvements (answering the questions.pdf review)
+## Improvements 
 
-These upgrades were merged into the codebase from the `essentials/` design docs
-and the `QUESTIONS-ANSWERED.md` review. All are verified by
+All are verified by
 `integrations/integration_test.py` (13/13 checks, runs without Docker).
 
 - **ThousandEyes idea, one rule (link physics).** `link-node` now applies real

@@ -76,6 +76,22 @@ services:
     networks:
       - sanjeevani-net
 
+  command-center:
+    build: ./command-center
+    container_name: sanjeevani-command-center
+    depends_on:
+      - cloud-api
+      - simulation-controller
+    ports:
+      - "9400:9400"
+    environment:
+      PORT: 9400
+      CLOUD_URL: http://cloud-api:9000
+      SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+      POD_URLS: "POD-01=http://pod-01:8000,POD-02=http://pod-02:8000,POD-03=http://pod-03:8000,POD-04=http://pod-04:8000,POD-05=http://pod-05:8000,POD-06=http://pod-06:8000,POD-07=http://pod-07:8000,POD-08=http://pod-08:8000,POD-09=http://pod-09:8000,POD-10=http://pod-10:8000"
+    networks:
+      - sanjeevani-net
+
   pod-01:
     build: ./pod-agent
     container_name: sanjeevani-pod-01
