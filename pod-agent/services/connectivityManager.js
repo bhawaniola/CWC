@@ -17,10 +17,13 @@ const podInfo = {
 };
 
 const HEALTH_POLL_INTERVAL_MS = Number(process.env.HEALTH_POLL_INTERVAL_MS || 5000);
+const MESH_RELAY_LOG_INTERVAL_MS = Number(process.env.MESH_RELAY_LOG_INTERVAL_MS || 60000);
 let healthPollTimer = null;
 let healthPollPromise = null;
 const healthChangeListeners = new Set();
 let lastHealthSignature = "";
+let lastMeshRelayLogSignature = "";
+let lastMeshRelayLogAt = 0;
 let latestHealthSnapshot = {
   satelliteStatus: "unknown",
   cellularStatus: podInfo.cellTowers.length > 0 ? "unknown" : "not-configured",
@@ -335,7 +338,10 @@ async function inspectNeighborForRelay(neighborUrl, base) {
 
 
 async function findMeshRelay(base) {
-  // 1. Ask our custom Gossip Router for the mathematically shortest path
+  // Keep dynamic routing bounded by the range-based neighbor topology from docker-compose.
+  gossipRouter.setNeighborUrls(podInfo.neighbors);
+
+  // 1. Ask our custom Gossip Router for the mathematically shortest configured next hop
   const bestDynamicNeighbor = gossipRouter.getBestDynamicNeighbor();
 
   // 2. If no one is alive around us, we are officially an offline island
@@ -343,9 +349,22 @@ async function findMeshRelay(base) {
     return null; 
   }
 
-  console.log(
-    `[connectivity] ${podInfo.podId} ALGORITHM SELECTED ${bestDynamicNeighbor.podId} as optimal mesh relay (${bestDynamicNeighbor.hopsToCloud} hops to cloud)`
-  );
+  const routePath = bestDynamicNeighbor.routePath?.length
+    ? bestDynamicNeighbor.routePath.join(" -> ")
+    : bestDynamicNeighbor.podId;
+  const logSignature = `${bestDynamicNeighbor.podId}|${bestDynamicNeighbor.hopsToCloud}|${routePath}`;
+  const now = Date.now();
+
+  if (
+    logSignature !== lastMeshRelayLogSignature ||
+    now - lastMeshRelayLogAt >= MESH_RELAY_LOG_INTERVAL_MS
+  ) {
+    lastMeshRelayLogSignature = logSignature;
+    lastMeshRelayLogAt = now;
+    console.log(
+      `[connectivity] ${podInfo.podId} selected configured neighbor ${bestDynamicNeighbor.podId} as optimal mesh relay (${bestDynamicNeighbor.hopsToCloud} hops to cloud)`
+    );
+  }
 
   // 3. Format the data so the rest of Pranav's app still understands it
   const relayPodFormat = {

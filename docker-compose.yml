@@ -92,7 +92,7 @@ services:
       SATELLITE_URL: http://satellite:9100
       CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
       CONNECTED_TOWERS: CELLTOWER-1
-      NEIGHBORS: http://pod-02:8000,http://pod-03:8000
+      NEIGHBORS: http://pod-02:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./pod-data/pod-01:/app/data
@@ -112,7 +112,7 @@ services:
       SATELLITE_URL: http://satellite:9100
       CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
       CONNECTED_TOWERS: CELLTOWER-1
-      NEIGHBORS: http://pod-01:8000,http://pod-04:8000
+      NEIGHBORS: http://pod-01:8000,http://pod-03:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./pod-data/pod-02:/app/data
@@ -132,7 +132,7 @@ services:
       SATELLITE_URL: http://satellite:9100
       CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
       CONNECTED_TOWERS: CELLTOWER-1
-      NEIGHBORS: http://pod-01:8000,http://pod-05:8000
+      NEIGHBORS: http://pod-02:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./pod-data/pod-03:/app/data
@@ -150,9 +150,9 @@ services:
       POD_NAME: Riverbank Village Pod
       POD_REGION: Region-04
       SATELLITE_URL: http://satellite:9100
-      CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
-      CONNECTED_TOWERS: CELLTOWER-1
-      NEIGHBORS: http://pod-02:8000,http://pod-06:8000
+      CELL_TOWERS: ""
+      CONNECTED_TOWERS: ""
+      NEIGHBORS: http://pod-05:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./pod-data/pod-04:/app/data
@@ -170,9 +170,9 @@ services:
       POD_NAME: Evacuation Route Pod
       POD_REGION: Region-05
       SATELLITE_URL: http://satellite:9100
-      CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201,CELLTOWER-2=http://celltower-2:9202
-      CONNECTED_TOWERS: CELLTOWER-1,CELLTOWER-2
-      NEIGHBORS: http://pod-03:8000,http://pod-07:8000
+      CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
+      CONNECTED_TOWERS: CELLTOWER-1
+      NEIGHBORS: http://pod-04:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./pod-data/pod-05:/app/data
@@ -190,9 +190,9 @@ services:
       POD_NAME: Remote Village Pod
       POD_REGION: Region-06
       SATELLITE_URL: http://satellite:9100
-      CELL_TOWERS: CELLTOWER-2=http://celltower-2:9202
-      CONNECTED_TOWERS: CELLTOWER-2
-      NEIGHBORS: http://pod-04:8000,http://pod-08:8000
+      CELL_TOWERS: ""
+      CONNECTED_TOWERS: ""
+      NEIGHBORS: ""
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./pod-data/pod-06:/app/data
@@ -212,7 +212,7 @@ services:
       SATELLITE_URL: http://satellite:9100
       CELL_TOWERS: CELLTOWER-2=http://celltower-2:9202
       CONNECTED_TOWERS: CELLTOWER-2
-      NEIGHBORS: http://pod-05:8000,http://pod-09:8000
+      NEIGHBORS: http://pod-09:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./pod-data/pod-07:/app/data
@@ -232,7 +232,7 @@ services:
       SATELLITE_URL: http://satellite:9100
       CELL_TOWERS: CELLTOWER-2=http://celltower-2:9202
       CONNECTED_TOWERS: CELLTOWER-2
-      NEIGHBORS: http://pod-06:8000,http://pod-10:8000
+      NEIGHBORS: ""
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./pod-data/pod-08:/app/data
@@ -252,7 +252,7 @@ services:
       SATELLITE_URL: http://satellite:9100
       CELL_TOWERS: ""
       CONNECTED_TOWERS: ""
-      NEIGHBORS: http://pod-07:8000,http://pod-10:8000
+      NEIGHBORS: http://pod-10:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./pod-data/pod-09:/app/data
@@ -272,7 +272,7 @@ services:
       SATELLITE_URL: http://satellite:9100
       CELL_TOWERS: ""
       CONNECTED_TOWERS: ""
-      NEIGHBORS: http://pod-08:8000,http://pod-09:8000
+      NEIGHBORS: http://pod-09:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./pod-data/pod-10:/app/data

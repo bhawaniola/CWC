@@ -14,6 +14,7 @@ const { triageRequest } = require("./services/triageService");
 const app = express();
 const PORT = process.env.PORT || 8000;
 const MANAGER_API_KEY = process.env.MANAGER_API_KEY || "sanjeevani-manager-demo-key";
+const GOSSIP_SWEEP_INTERVAL_MS = Number(process.env.GOSSIP_SWEEP_INTERVAL_MS || 2000);
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
@@ -578,8 +579,9 @@ app.listen(PORT, () => {
   console.log(`[pod-agent] neighbors: ${connectivity.podInfo.neighbors.join(", ") || "none"}`);
 });
 
+gossipRouter.setNeighborUrls(connectivity.podInfo.neighbors);
 
-// Start the dynamic background sweeper every 0.5 seconds
+// Start the range-bounded dynamic background sweeper.
 setInterval(() => {
   gossipRouter.sweepNetwork();
-}, 500);
+}, GOSSIP_SWEEP_INTERVAL_MS);

@@ -57,17 +57,19 @@ pod-01..pod-10         local pod SOS app, routing engine, queue, and mesh relay
 ## 10-Pod Topology
 
 ```text
-POD-01: CELLTOWER-1, neighbors POD-02/POD-03
-POD-02: CELLTOWER-1, neighbors POD-01/POD-04
-POD-03: CELLTOWER-1, neighbors POD-01/POD-05
-POD-04: CELLTOWER-1, neighbors POD-02/POD-06
-POD-05: CELLTOWER-1 + CELLTOWER-2, neighbors POD-03/POD-07
-POD-06: CELLTOWER-2, neighbors POD-04/POD-08
-POD-07: CELLTOWER-2, neighbors POD-05/POD-09
-POD-08: CELLTOWER-2, neighbors POD-06/POD-10
-POD-09: no cell tower, neighbors POD-07/POD-10
-POD-10: no cell tower, neighbors POD-08/POD-09
+POD-01: CELLTOWER-1, neighbors POD-02
+POD-02: CELLTOWER-1, neighbors POD-01/POD-03
+POD-03: CELLTOWER-1, neighbors POD-02
+POD-04: no cell tower, neighbors POD-05
+POD-05: CELLTOWER-1, neighbors POD-04
+POD-06: no cell tower, no mesh neighbors
+POD-07: CELLTOWER-2, neighbors POD-09
+POD-08: CELLTOWER-2, no mesh neighbors
+POD-09: no cell tower, neighbors POD-10
+POD-10: no cell tower, neighbors POD-09
 ```
+
+CELLTOWER-1 covers POD-01, POD-02, POD-03, and POD-05. CELLTOWER-2 covers POD-07 and POD-08.
 
 Every pod has satellite configured. Local pod controls can disable satellite/cellular/mesh for only that pod. Global infrastructure controls fail or restore the shared satellite/celltower services for all pods.
 
@@ -158,10 +160,10 @@ Enable satellite only on POD-01:
 curl.exe -X POST http://localhost:8001/api/network/satellite/enable -H "Content-Type: application/json" -d "{}"
 ```
 
-Disable cellular only on POD-09:
+Disable cellular only on POD-08:
 
 ```powershell
-curl.exe -X POST http://localhost:8009/api/network/cellular/disable -H "Content-Type: application/json" -d "{}"
+curl.exe -X POST http://localhost:8008/api/network/cellular/disable -H "Content-Type: application/json" -d "{}"
 ```
 
 View a pod queue:
@@ -186,12 +188,12 @@ curl.exe -X POST http://localhost:8001/api/pod/name -H "Content-Type: applicatio
 
 1. Normal path: keep all links up, submit SOS to POD-01, and verify `forwardedBy` is `satellite` in `http://localhost:9000/api/requests`.
 2. Satellite failover: fail satellite, submit SOS to POD-01, and verify `forwardedBy` is `CELLTOWER-1`.
-3. Dual tower behavior: fail satellite and CELLTOWER-1, then submit to POD-05. It should use `CELLTOWER-2`.
-4. No cellular pod: fail satellite, then submit to POD-09. It should relay by mesh if a neighbor has a cloud path.
+3. Alternate tower behavior: fail satellite and CELLTOWER-1, then submit to POD-07. It should use `CELLTOWER-2`.
+4. No cellular pod with relay: fail satellite, then submit to POD-04. It should relay by mesh to POD-05 if POD-05 has a cloud path.
 5. Island mode: disable satellite, cellular, and mesh locally on one pod, submit SOS, then check `/api/queue`.
 6. Queue restore: re-enable a path and call `/api/sync`; queued SOS should move to cloud.
 7. Local-only control: disable cellular on POD-01 and check POD-02; POD-02 remains unaffected.
-8. Global control: fail CELLTOWER-1 and check POD-01 through POD-04; all see tower 1 down.
+8. Global control: fail CELLTOWER-1 and check POD-01, POD-02, POD-03, and POD-05; all see tower 1 down.
 9. UI path test: open any pod UI, use the global and local controls, and watch the route card update.
 
 ## Stop And Reset

@@ -38,61 +38,61 @@ const podTopology = [
     id: "POD-01",
     name: "District Command Pod",
     towers: ["CELLTOWER-1"],
-    neighbors: ["POD-02", "POD-03"]
+    neighbors: ["POD-02"]
   },
   {
     id: "POD-02",
     name: "Hospital Relief Pod",
     towers: ["CELLTOWER-1"],
-    neighbors: ["POD-01", "POD-04"]
+    neighbors: ["POD-01", "POD-03"]
   },
   {
     id: "POD-03",
     name: "School Shelter Pod",
     towers: ["CELLTOWER-1"],
-    neighbors: ["POD-01", "POD-05"]
+    neighbors: ["POD-02"]
   },
   {
     id: "POD-04",
     name: "Riverbank Village Pod",
-    towers: ["CELLTOWER-1"],
-    neighbors: ["POD-02", "POD-06"]
+    towers: [],
+    neighbors: ["POD-05"]
   },
   {
     id: "POD-05",
     name: "Evacuation Route Pod",
-    towers: ["CELLTOWER-1", "CELLTOWER-2"],
-    neighbors: ["POD-03", "POD-07"]
+    towers: ["CELLTOWER-1"],
+    neighbors: ["POD-04"]
   },
   {
     id: "POD-06",
     name: "Remote Village Pod",
-    towers: ["CELLTOWER-2"],
-    neighbors: ["POD-04", "POD-08"]
+    towers: [],
+    neighbors: []
   },
   {
     id: "POD-07",
     name: "Supply Warehouse Pod",
     towers: ["CELLTOWER-2"],
-    neighbors: ["POD-05", "POD-09"]
+    neighbors: ["POD-09"]
   },
   {
     id: "POD-08",
     name: "Medical Camp Pod",
     towers: ["CELLTOWER-2"],
-    neighbors: ["POD-06", "POD-10"]
+    neighbors: []
   },
   {
     id: "POD-09",
     name: "High Ground Shelter Pod",
     towers: [],
-    neighbors: ["POD-07", "POD-10"]
+    neighbors: ["POD-10"]
   },
   {
     id: "POD-10",
     name: "Mobile Relay Pod",
     towers: [],
-    neighbors: ["POD-08", "POD-09"]
+    neighbors: ["POD-09"]
   }
 ];
 
