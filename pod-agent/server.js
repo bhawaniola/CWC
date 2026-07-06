@@ -30,6 +30,7 @@ app.use(express.static(staticPath));
 const syncWorker = startSyncWorker({
   calculateMode: connectivity.calculateMode,
   forwardViaRoute: connectivity.forwardViaRoute,
+  forwardBatchViaRoute: connectivity.forwardBatchViaRoute,
   sendToRelay: connectivity.sendToRelay,
   podInfo: connectivity.podInfo
 });
@@ -323,23 +324,44 @@ app.get("/api/alerts", (req, res) => {
   });
 });
 
-app.post("/api/alerts", (req, res) => {
-  if (req.body && req.body.signature && req.body.verified !== true) {
-    return res.status(401).json({
-      success: false,
-      message: "Unsigned or untrusted alert rejected by pod shield."
-    });
+app.post("/api/alerts", async (req, res) => {
+  // SANJEEVANI-Shield: real Ed25519 verification with the cloud's public key
+  // (cached at enrollment), sequence freshness (anti-replay), and scope check.
+  // A forged or replayed alert is rejected AND reported as a security event
+  // that rides the normal queue ladder up to the cloud.
+  const verdict = connectivity.verifyAlert(req.body || {});
+
+  if (!verdict.ok) {
+    const identity = connectivity.getPodIdentity();
+    console.warn(
+      `[pod-agent] ${identity.podId} SHIELD rejected alert: ${verdict.reason} — "${String(
+        req.body?.message || ""
+      ).slice(0, 60)}"`
+    );
+    if (verdict.code === 401) {
+      try {
+        await connectivity.sendSecurityEvent({
+          severity: 9,
+          detail: `Rejected alert (${verdict.reason}): ${String(req.body?.message || "").slice(0, 80)}`
+        });
+        triggerQueueSync("security-event");
+      } catch (error) {
+        console.warn(`[pod-agent] could not queue security event: ${error.message}`);
+      }
+    }
+    return res.status(verdict.code).json({ success: false, message: verdict.reason });
   }
 
   const alert = hazardPacks.storeAlert({
     ...req.body,
+    verified: true,
     source: req.body && req.body.source ? req.body.source : "cloud-api",
     receivedAt: new Date().toISOString()
   });
 
   res.status(201).json({
     success: true,
-    message: "Alert stored at pod.",
+    message: "Signed alert verified and stored at pod.",
     data: alert
   });
 });
@@ -364,6 +386,10 @@ app.post("/api/sensors", async (req, res) => {
       }
     }
 
+    if (result.fired.length > 0) {
+      triggerQueueSync("hazard-alert");
+    }
+
     res.status(result.fired.length > 0 ? 201 : 200).json({
       success: true,
       message:
@@ -385,7 +411,40 @@ app.post("/sensor", async (req, res) => {
   app.handle(req, res);
 });
 
-app.post("/api/requests", async (req, res) => {
+// Per-device rate limiting (token bucket): protects the shared uplink from a
+// stuck retry loop or a hostile flood without ever blocking a first SOS.
+// Keyed by the x-device-id header (each citizen device/browser) with IP as
+// the fallback. Tune with RATE_LIMIT_BURST / RATE_LIMIT_REFILL_MS.
+const RATE_LIMIT_BURST = Number(process.env.RATE_LIMIT_BURST || 6);
+const RATE_LIMIT_REFILL_MS = Number(process.env.RATE_LIMIT_REFILL_MS || 2000);
+const rateBuckets = new Map();
+
+function rateLimitRequests(req, res, next) {
+  const key = req.header("x-device-id") || req.ip || "unknown";
+  const now = Date.now();
+  const bucket = rateBuckets.get(key) || { tokens: RATE_LIMIT_BURST, lastRefill: now };
+
+  const refill = Math.floor((now - bucket.lastRefill) / RATE_LIMIT_REFILL_MS);
+  if (refill > 0) {
+    bucket.tokens = Math.min(RATE_LIMIT_BURST, bucket.tokens + refill);
+    bucket.lastRefill = now;
+  }
+
+  if (bucket.tokens <= 0) {
+    rateBuckets.set(key, bucket);
+    return res.status(429).json({
+      success: false,
+      message:
+        "Too many requests from this device. Your earlier SOS is already queued — volunteers will reach you."
+    });
+  }
+
+  bucket.tokens -= 1;
+  rateBuckets.set(key, bucket);
+  return next();
+}
+
+app.post("/api/requests", rateLimitRequests, async (req, res) => {
   const validationError = validateRequestBody(req.body);
   if (validationError) {
     return res.status(400).json({
@@ -585,3 +644,7 @@ gossipRouter.setNeighborUrls(connectivity.podInfo.neighbors);
 setInterval(() => {
   gossipRouter.sweepNetwork();
 }, GOSSIP_SWEEP_INTERVAL_MS);
+
+// SANJEEVANI-Shield enrollment: fetch the cloud's alert-signing public key
+// through a link-node (retries every 5s until any link is reachable).
+connectivity.startEnrollment();

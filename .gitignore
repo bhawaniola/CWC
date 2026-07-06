@@ -2,3 +2,5 @@
 *.pyc
 .env
 pod-data/
+node_modules/
+dist/

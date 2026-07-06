@@ -4,6 +4,8 @@ services:
     container_name: sanjeevani-cloud-api
     ports:
       - "9000:9000"
+    environment:
+      POD_URLS: "POD-01=http://pod-01:8000,POD-02=http://pod-02:8000,POD-03=http://pod-03:8000,POD-04=http://pod-04:8000,POD-05=http://pod-05:8000,POD-06=http://pod-06:8000,POD-07=http://pod-07:8000,POD-08=http://pod-08:8000,POD-09=http://pod-09:8000,POD-10=http://pod-10:8000"
     networks:
       - sanjeevani-net
 

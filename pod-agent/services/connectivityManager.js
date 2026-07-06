@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const axios = require("axios");
 const localQueue = require("./localQueue");
 const podSettings = require("./podSettings");
@@ -123,10 +124,13 @@ function summarizeCellular(towerStatuses) {
   }
 
   const upCount = towerStatuses.filter((tower) => tower.status === "up").length;
+  const usableCount = towerStatuses.filter(
+    (tower) => tower.status === "up" || tower.status === "degraded"
+  ).length;
   if (upCount === towerStatuses.length) {
     return "up";
   }
-  if (upCount > 0) {
+  if (usableCount > 0) {
     return "degraded";
   }
   return "down";
@@ -441,6 +445,44 @@ async function calculateMode(options = {}) {
     }
   }
 
+  // Predictive-failover tail: a DEGRADED link (loss >= 25%, e.g. rain fade)
+  // ranks below any healthy link — traffic moved away above — but a degraded
+  // link that still works always beats mesh relay and island mode.
+  if (networkState.satelliteEnabled && satelliteStatus === "degraded") {
+    return {
+      ...base,
+      mode: "cloud",
+      activePath: "satellite",
+      degradedLink: true,
+      activeLink: {
+        name: "satellite",
+        type: "satellite",
+        url: podInfo.satelliteUrl
+      },
+      activeCellTower: null,
+      relayPod: null
+    };
+  }
+
+  if (networkState.cellularEnabled) {
+    const degradedTower = towerStatuses.find((tower) => tower.status === "degraded");
+    if (degradedTower) {
+      return {
+        ...base,
+        mode: "cloud",
+        activePath: "cellular",
+        degradedLink: true,
+        activeLink: {
+          name: degradedTower.name,
+          type: "cellular",
+          url: degradedTower.url
+        },
+        activeCellTower: degradedTower.name,
+        relayPod: null
+      };
+    }
+  }
+
   if (allowMeshRelay && networkState.meshEnabled && podInfo.neighbors.length > 0) {
     const relayRoute = await findMeshRelay(base);
     if (relayRoute) {
@@ -511,14 +553,136 @@ async function forwardViaRoute(route, request) {
   return response.data;
 }
 
+// Hazard alerts and security events are not "local only" anymore: they are
+// enqueued as special request categories and ride the SAME store-and-forward
+// ladder as citizen SOS (satellite -> cellular -> mesh -> island queue).
+// When an EARLY-WARNING reaches the cloud, the cloud answers with an
+// Ed25519-signed broadcast to every pod.
+function enqueueSystemEvent(category, fields) {
+  const identity = getPodIdentity();
+  const event = {
+    id: crypto.randomUUID(),
+    podId: identity.podId,
+    podName: identity.podName,
+    region: identity.region,
+    name: category === "SECURITY" ? "POD-SHIELD" : "HAZARD-SENSOR",
+    category,
+    location: identity.podName,
+    language: { code: "en", name: "English", nativeName: "English", speechLocale: "en-IN" },
+    syncStatus: "pending",
+    createdAt: new Date().toISOString(),
+    ...fields
+  };
+  localQueue.enqueue(event);
+  console.log(`[connectivity] ${podInfo.podId} queued ${category} event ${event.id} for cloud sync`);
+  return { success: true, queued: true, id: event.id };
+}
+
 async function sendPodAlert(alert) {
-  console.log(`[connectivity] ${podInfo.podId} stored local hazard alert ${alert.id || alert.hazard}`);
-  return { success: true, localOnly: true };
+  return enqueueSystemEvent("EARLY-WARNING", {
+    hazard: alert.hazard,
+    message: alert.message,
+    triage: {
+      severity: alert.severity || 9,
+      priority: "critical",
+      reason: alert.trigger || "hazard pack triggered"
+    }
+  });
 }
 
 async function sendSecurityEvent(event) {
-  console.log(`[connectivity] ${podInfo.podId} stored local security event ${event.source}`);
-  return { success: true, localOnly: true };
+  return enqueueSystemEvent("SECURITY", {
+    message: event.detail,
+    triage: { severity: event.severity || 9, priority: "critical", reason: "Shield: rejected at pod" }
+  });
+}
+
+// ---- SANJEEVANI-Shield enrollment: fetch the cloud's alert-signing public
+// key THROUGH a link-node (pods never talk to the cloud directly), cache it
+// forever, and verify every incoming alert locally — works even offline.
+let cloudPublicKey = null;
+let lastAlertSeq = 0;
+
+function canonicalAlert(alert) {
+  const keys = Object.keys(alert).filter((key) => key !== "signature").sort();
+  const ordered = {};
+  for (const key of keys) {
+    ordered[key] = alert[key];
+  }
+  return Buffer.from(JSON.stringify(ordered));
+}
+
+async function fetchPubkeyOnce() {
+  const sources = [podInfo.satelliteUrl, ...podInfo.cellTowers.map((tower) => tower.url)];
+  for (const source of sources) {
+    if (!source) continue;
+    try {
+      const response = await axios.get(`${source}/api/pubkey`, { timeout: 2000 });
+      const hex = response.data?.data?.pubkeyDerHex;
+      if (hex) {
+        cloudPublicKey = crypto.createPublicKey({
+          key: Buffer.from(hex, "hex"),
+          format: "der",
+          type: "spki"
+        });
+        console.log(`[connectivity] ${podInfo.podId} enrolled: alert trust anchor cached via ${source}`);
+        return true;
+      }
+    } catch (error) {
+      // try the next link
+    }
+  }
+  return false;
+}
+
+function startEnrollment() {
+  const attempt = () => {
+    if (cloudPublicKey) return;
+    fetchPubkeyOnce().then((done) => {
+      if (!done) setTimeout(attempt, 5000);
+    });
+  };
+  attempt();
+}
+
+function verifyAlert(alert) {
+  if (!cloudPublicKey) {
+    return { ok: false, code: 503, reason: "no trust anchor yet — alert refused" };
+  }
+  const signatureHex = alert?.signature;
+  if (!signatureHex) {
+    return { ok: false, code: 401, reason: "unsigned alert rejected" };
+  }
+  let valid = false;
+  try {
+    valid = crypto.verify(null, canonicalAlert(alert), cloudPublicKey, Buffer.from(signatureHex, "hex"));
+  } catch (error) {
+    valid = false;
+  }
+  if (!valid) {
+    return { ok: false, code: 401, reason: "invalid signature — alert rejected" };
+  }
+  if (Number(alert.seq || 0) <= lastAlertSeq) {
+    return { ok: false, code: 401, reason: "stale sequence — replay rejected" };
+  }
+  const scope = alert.scope || "all";
+  if (scope !== "all" && !String(scope).includes(podInfo.podId)) {
+    return { ok: false, code: 401, reason: "scope mismatch — alert rejected" };
+  }
+  lastAlertSeq = Number(alert.seq);
+  return { ok: true };
+}
+
+async function forwardBatchViaRoute(route, requestsForSync) {
+  if (!route.activeLink?.url) {
+    throw new Error("No active link is available for batch forwarding.");
+  }
+  const response = await axios.post(
+    `${route.activeLink.url}/api/forward-batch`,
+    { requests: requestsForSync },
+    { timeout: 8000 }
+  );
+  return response.data;
 }
 
 async function sendToRelay(relayUrl, request) {
@@ -578,6 +742,7 @@ module.exports = {
   calculateMode,
   ciscoSimulation,
   forwardViaRoute,
+  forwardBatchViaRoute,
   getPodIdentity,
   getHealthSnapshot,
   podInfo,
@@ -587,6 +752,8 @@ module.exports = {
   sendPodAlert,
   sendSecurityEvent,
   sendToRelay,
+  startEnrollment,
   startHealthPolling,
+  verifyAlert,
   setPodName: podSettings.setPodName
 };

@@ -73,7 +73,26 @@ CELLTOWER-1 covers POD-01, POD-02, POD-03, and POD-05. CELLTOWER-2 covers POD-07
 
 Every pod has satellite configured. Local pod controls can disable satellite/cellular/mesh for only that pod. Global infrastructure controls fail or restore the shared satellite/celltower services for all pods.
 
-## Queue And Routing Order
+## Resilience Upgrades (link physics, Shield, surge protection)
+
+These upgrades answer the "questions.pdf" review (see `essentials/QUESTIONS-ANSWERED.md`)
+and are verified end-to-end by `integrations/integration_test.py` (13 checks, no Docker
+needed — runs the services as local Node processes).
+
+### Link physics + predictive failover (the ThousandEyes idea with one rule)
+
+Every link-node now simulates real transmission physics: it sleeps its latency
+(satellite 80 ms, cellular 30 ms) and drops packets according to its `loss`
+setting. Loss >= 25% makes `/health` report `degraded`.
+
+```powershell
+curl.exe "http://localhost:9100/set?loss=0.4"     # rain fade on the satellite
+curl.exe "http://localhost:9100/set?loss=0"       # weather clears
+```
+
+Pod routing now understands three link states, in strict preference order:
+healthy satellite -> healthy tower -> DEGRADED satellite -> DEGRADED tower ->
+mesh -> island. So when rain fade degrades the satellite, traffic moves to
 
 Every citizen SOS is first accepted by that pod's own backend and stored in that pod's persistent queue at `pod-data/pod-XX/queue.json`. The pod sync worker wakes immediately after submission and also runs every 5 seconds.
 
@@ -182,6 +201,38 @@ Edit a pod display name:
 
 ```powershell
 curl.exe -X POST http://localhost:8001/api/pod/name -H "Content-Type: application/json" -d "{\"podName\":\"Updated Command Pod\"}"
+```
+
+## Improvements (answering the questions.pdf review)
+
+These upgrades were merged into the codebase from the `essentials/` design docs
+and the `QUESTIONS-ANSWERED.md` review. All are verified by
+`integrations/integration_test.py` (13/13 checks, runs without Docker).
+
+- **ThousandEyes idea, one rule (link physics).** `link-node` now applies real
+  latency and packet loss. `GET /health` reports `up`/`degraded`/`down` based on
+  loss; a **degraded** link (loss >= 25%, e.g. rain fade) ranks below a healthy
+  link so pods move traffic *before* an outage — predictive failover. Simulate:
+  `curl "http://localhost:9100/set?loss=0.4"`.
+- **Real SANJEEVANI-Shield signing.** The cloud holds an Ed25519 private key and
+  signs every alert; pods fetch the public key once **through a link-node**
+  (`/api/pubkey`, enrollment) and verify locally — signature + sequence
+  freshness (anti-replay) + scope. A forged/replayed alert is rejected (401) and
+  a `SECURITY` event rides the normal ladder to the cloud. The old
+  `verified:true` boolean bypass is gone.
+- **Hazard -> cloud -> signed broadcast loop.** A fired hazard pack now enqueues
+  an `EARLY-WARNING` event that syncs to the cloud through the ladder; the cloud
+  answers with a signed broadcast to every pod (production: Webex Connect blast).
+- **Bandwidth answers (Q4).** Per-device **rate limiting** (token bucket, 429 on
+  abuse, keyed by `x-device-id`) and **batch sync** (a backlog of >3 items syncs
+  in one link transmission via `/api/forward-batch`).
+- **Demo scripts** in `integrations/`: `simulate_crowd.py` (surge realism),
+  `inject_forged_alert.py` (Shield rejection).
+
+Run the verification:
+
+```powershell
+py -3 integrations/integration_test.py
 ```
 
 ## Demo Scenarios

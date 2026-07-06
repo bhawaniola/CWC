@@ -29,7 +29,7 @@ function meshTargetsFor(route, request, currentPodId) {
   return targets.filter((target) => target?.url && !visited.has(target.podId));
 }
 
-function startSyncWorker({ calculateMode, forwardViaRoute, sendToRelay, podInfo }) {
+function startSyncWorker({ calculateMode, forwardViaRoute, forwardBatchViaRoute, sendToRelay, podInfo }) {
   let activeSync = null;
 
   async function runSync(trigger = "auto") {
@@ -72,6 +72,56 @@ function startSyncWorker({ calculateMode, forwardViaRoute, sendToRelay, podInfo 
     console.log(
       `[syncWorker] ${podInfo.podId} selected ${route.activePath} for queue sync (mode=${route.mode}, tower=${route.activeCellTower || "none"}, relay=${route.relayPod?.podId || "none"})`
     );
+
+    // Surge optimization: with a direct cloud route and a backlog, send ONE
+    // batched transmission through the link-node instead of N separate ones —
+    // one latency payment for the whole queue (the thin-uplink answer).
+    if (route.mode === "cloud" && typeof forwardBatchViaRoute === "function" && queuedRequests.length > 3) {
+      try {
+        const batch = queuedRequests.map((queuedRequest) => ({
+          ...queuedRequest,
+          syncAttemptAt: new Date().toISOString(),
+          syncStatus:
+            route.activePath === "cellular"
+              ? "synced-after-reconnect-via-cellular"
+              : "synced-after-reconnect-via-satellite",
+          syncedAt: new Date().toISOString(),
+          network: {
+            ...(queuedRequest.network || {}),
+            syncMode: route.mode,
+            syncPath: route.activePath,
+            syncCellTower: route.activeCellTower || null,
+            syncBatch: true
+          }
+        }));
+
+        const result = await forwardBatchViaRoute(route, batch);
+        const forwardedIds = new Set(result?.forwarded || []);
+
+        for (const id of forwardedIds) {
+          localQueue.removeFromQueue(id);
+        }
+
+        console.log(
+          `[syncWorker] ${podInfo.podId} batch-synced ${forwardedIds.size}/${queuedRequests.length} request(s) through ${route.activePath}`
+        );
+
+        return {
+          success: forwardedIds.size === queuedRequests.length,
+          trigger,
+          message: `Batch-synced ${forwardedIds.size} of ${queuedRequests.length} queued request(s) through ${route.activePath}.`,
+          mode: route.mode,
+          activePath: route.activePath,
+          synced: forwardedIds.size,
+          failed: queuedRequests.length - forwardedIds.size,
+          remaining: localQueue.getQueueCount()
+        };
+      } catch (error) {
+        console.warn(
+          `[syncWorker] ${podInfo.podId} batch sync failed (${error.message}); falling back to per-item sync`
+        );
+      }
+    }
 
     let synced = 0;
     let failed = 0;
