@@ -66,6 +66,15 @@ function requestSnapshot(request) {
   };
 }
 
+function withForwardMetadata(payload) {
+  return {
+    ...payload,
+    forwardedBy: LINK_ID,
+    linkType: LINK_TYPE,
+    forwardedAt: new Date().toISOString()
+  };
+}
+
 app.get("/health", (req, res) => {
   return res.json(statusPayload(true));
 });
@@ -117,12 +126,7 @@ app.post("/api/forward", async (req, res) => {
     });
   }
 
-  const forwardedRequest = {
-    ...req.body,
-    forwardedBy: LINK_ID,
-    linkType: LINK_TYPE,
-    forwardedAt: new Date().toISOString()
-  };
+  const forwardedRequest = withForwardMetadata(req.body);
 
   console.log(
     `[link-node] ${LINK_ID} received ${forwardedRequest.id || "unknown-request"} from ${
@@ -184,6 +188,42 @@ app.post("/api/forward-batch", async (req, res) => {
     `[link-node] ${LINK_ID} batch: forwarded ${forwarded.length}/${items.length} queued request(s)`
   );
   res.json({ success: failed.length === 0, forwarded, failed });
+});
+
+app.post(/^\/api\/forward\/(.+)$/, async (req, res) => {
+  const targetPath = req.params[0];
+  const forwardedPayload = withForwardMetadata(req.body);
+
+  try {
+    const response = await axios.post(`${CLOUD_URL}/api/${targetPath}`, forwardedPayload, {
+      timeout: 2500
+    });
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(502).json({
+      success: false,
+      message: `${LINK_ID} could not forward to cloud API path /api/${targetPath}.`,
+      detail: error.message
+    });
+  }
+});
+
+app.get(/^\/api\/cloud\/(.+)$/, async (req, res) => {
+  const targetPath = req.params[0];
+  const query = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : "";
+
+  try {
+    const response = await axios.get(`${CLOUD_URL}/api/${targetPath}${query}`, {
+      timeout: 2500
+    });
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(502).json({
+      success: false,
+      message: `${LINK_ID} could not read cloud API path /api/${targetPath}.`,
+      detail: error.message
+    });
+  }
 });
 
 app.listen(PORT, () => {

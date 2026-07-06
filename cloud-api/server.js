@@ -6,6 +6,8 @@ const axios = require("axios");
 const app = express();
 const PORT = process.env.PORT || 9000;
 const requests = [];
+const coordinatorEvents = [];
+const coordinatorMessages = [];
 
 // SANJEEVANI-Shield: the cloud is the only holder of the alert-signing
 // private key. Pods fetch the public key once (through a link-node) and
@@ -92,6 +94,55 @@ function requestSnapshot(request) {
   };
 }
 
+function isCoordinatorEvent(request) {
+  return Boolean(
+    request.requestKind?.startsWith("coordinator-") ||
+      request.coordinatorId ||
+      request.coordinatorRole
+  );
+}
+
+function upsertCoordinatorEvent(event) {
+  const storedEvent = {
+    ...event,
+    cloudReceivedAt: event.cloudReceivedAt || nowIso()
+  };
+  const existingIndex = coordinatorEvents.findIndex(
+    (item) => item.id && storedEvent.id && item.id === storedEvent.id
+  );
+
+  if (existingIndex >= 0) {
+    coordinatorEvents[existingIndex] = {
+      ...coordinatorEvents[existingIndex],
+      ...storedEvent,
+      cloudUpdatedAt: nowIso()
+    };
+    return coordinatorEvents[existingIndex];
+  }
+
+  coordinatorEvents.unshift(storedEvent);
+  return storedEvent;
+}
+
+function coordinatorMessageMatchesQuery(message, query) {
+  const targetCoordinatorId = String(query.targetCoordinatorId || "").toLowerCase();
+  const targetRole = String(query.targetRole || query.role || "").toLowerCase();
+
+  if (!targetCoordinatorId && !targetRole) {
+    return true;
+  }
+
+  const messageTargetId = String(message.targetCoordinatorId || message.coordinatorId || "").toLowerCase();
+  const messageTargetRole = String(message.targetRole || message.role || message.coordinatorRole || "").toLowerCase();
+
+  return (
+    (targetCoordinatorId && messageTargetId === targetCoordinatorId) ||
+    (targetRole && messageTargetRole === targetRole) ||
+    messageTargetRole === "all" ||
+    messageTargetId === "all"
+  );
+}
+
 function storeRequest(body) {
   const request = {
     ...body,
@@ -135,6 +186,15 @@ function storeRequest(body) {
     console.log(`[cloud-api] SECURITY EVENT from ${request.podId}: ${request.message}`);
   }
 
+  if (isCoordinatorEvent(request)) {
+    const storedEvent = upsertCoordinatorEvent(request);
+    console.log(
+      `[cloud-api] coordinator event ${storedEvent.id || "unknown-event"} from ${
+        storedEvent.coordinatorId || storedEvent.podId || "unknown-coordinator"
+      }`
+    );
+  }
+
   return { request: duplicate ? requests[existingIndex] : request, duplicate };
 }
 
@@ -145,6 +205,8 @@ app.get("/api/health", (req, res) => {
       service: "sanjeevani-cloud-api",
       status: "up",
       receivedRequests: requests.length,
+      coordinatorEvents: coordinatorEvents.length,
+      coordinatorMessages: coordinatorMessages.length,
       alertsSent: alertsSent.length,
       checkedAt: nowIso()
     }
@@ -192,6 +254,84 @@ app.get("/api/requests", (req, res) => {
     success: true,
     count: requests.length,
     data: requests
+  });
+});
+
+app.post("/api/coordinator-events", (req, res) => {
+  const storedEvent = upsertCoordinatorEvent({
+    ...req.body,
+    cloudReceivedAt: nowIso()
+  });
+
+  res.status(201).json({
+    success: true,
+    message: "Coordinator event stored in cloud API.",
+    data: storedEvent,
+    count: coordinatorEvents.length
+  });
+});
+
+app.get("/api/coordinator-events", (req, res) => {
+  const coordinatorId = String(req.query.coordinatorId || "").toLowerCase();
+  const role = String(req.query.role || req.query.coordinatorRole || "").toLowerCase();
+  const filtered = coordinatorEvents.filter((event) => {
+    if (coordinatorId && String(event.coordinatorId || event.podId || "").toLowerCase() !== coordinatorId) {
+      return false;
+    }
+
+    if (role && String(event.coordinatorRole || event.role || "").toLowerCase() !== role) {
+      return false;
+    }
+
+    return true;
+  });
+
+  res.json({
+    success: true,
+    count: filtered.length,
+    data: filtered
+  });
+});
+
+app.post("/api/coordinator-messages", (req, res) => {
+  const message = {
+    ...req.body,
+    id: req.body?.id || `cloud-message-${Date.now()}`,
+    source: req.body?.source || "cloud-api",
+    cloudReceivedAt: nowIso()
+  };
+  const existingIndex = coordinatorMessages.findIndex((item) => item.id === message.id);
+
+  if (existingIndex >= 0) {
+    coordinatorMessages[existingIndex] = {
+      ...coordinatorMessages[existingIndex],
+      ...message,
+      cloudUpdatedAt: nowIso()
+    };
+  } else {
+    coordinatorMessages.unshift(message);
+  }
+
+  res.status(existingIndex >= 0 ? 200 : 201).json({
+    success: true,
+    message:
+      existingIndex >= 0
+        ? "Coordinator message updated in cloud API."
+        : "Coordinator message stored in cloud API.",
+    data: existingIndex >= 0 ? coordinatorMessages[existingIndex] : message,
+    count: coordinatorMessages.length
+  });
+});
+
+app.get("/api/coordinator-messages", (req, res) => {
+  const filtered = coordinatorMessages.filter((message) =>
+    coordinatorMessageMatchesQuery(message, req.query)
+  );
+
+  res.json({
+    success: true,
+    count: filtered.length,
+    data: filtered
   });
 });
 

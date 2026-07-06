@@ -16,8 +16,10 @@ Pods do not post directly to the cloud. A pod must forward through the satellite
 |   |-- client/                # modular React frontend source
 |   |-- public/                # legacy static fallback
 |   `-- services/              # routing, queue, settings, hazard, triage modules
+|-- coordinators/              # shared coordinator backend and React/Vite role dashboards
 |-- integrations/              # optional external demo feeders
-`-- pod-data/                  # generated runtime state, ignored by git
+|-- pod-data/                  # generated pod runtime state, ignored by git
+`-- coordinator-data/          # generated coordinator state, ignored by git
 ```
 
 Removed from the active architecture: the old root `control-center`, old `pod-simulator`, nested pod network folder, duplicate pod agents, and relay folder.
@@ -35,6 +37,15 @@ POD-01 UI:                 http://localhost:8001
 POD-02 UI:                 http://localhost:8002
 ...
 POD-10 UI:                 http://localhost:8010
+Hospital 1 Coordinator:    http://localhost:8101
+Hospital 2 Coordinator:    http://localhost:8102
+Shelter A Coordinator:     http://localhost:8103
+Shelter B Coordinator:     http://localhost:8104
+Shelter C Coordinator:     http://localhost:8105
+Workforce 1 Coordinator:   http://localhost:8106
+Workforce 2 Coordinator:   http://localhost:8107
+Fire Coordinator:          http://localhost:8108
+Flood Coordinator 1:       http://localhost:8109
 Cloud API health:          http://localhost:9000/api/health
 Satellite health:          http://localhost:9100/health
 CELLTOWER-1 health:        http://localhost:9201/health
@@ -52,7 +63,36 @@ celltower-1            cellular middleman forwarding to cloud-api
 celltower-2            cellular middleman forwarding to cloud-api
 simulation-controller  stops/starts satellite and cell tower Docker containers
 pod-01..pod-10         local pod SOS app, routing engine, queue, and mesh relay
+coordinators           role dashboards for hospital, shelter, workforce, fire, and flood rescue
 ```
+
+## Coordinator Topology
+
+Coordinator pods are built from the shared `coordinators` image. Each service has its own container, host port, and persisted data volume under `coordinator-data/`.
+
+```text
+HOSPITAL-01      Hospital 1 Command       covers POD-02, POD-06                  UI 8101
+HOSPITAL-02      Hospital 2 Command       covers POD-04, POD-07                  UI 8102
+SHELTER-A        Shelter A Camp           covers POD-01, POD-05, POD-04          UI 8103
+SHELTER-B        Shelter B Camp           covers POD-06, CELLTOWER-1             UI 8104
+SHELTER-C        Shelter C Camp           covers POD-08, POD-09, CELLTOWER-2     UI 8105
+WORKFORCE-01     Workforce Camp 1         covers POD-07, CELLTOWER-2             UI 8106
+WORKFORCE-02     Workforce Camp 2         covers POD-09                          UI 8107
+FIRE-01          Fire Coordinator         covers POD-05, CELLTOWER-1             UI 8108
+FLOOD-01         Flood Coordinator 1      covers POD-06, POD-09                  UI 8109
+```
+
+The coordinator UI layout is shared for active helper roles, while the cards and editable metrics change by role:
+
+```text
+Hospital:   beds, oxygen, doctors, ambulances, critical patients, medicine kits
+Shelter:    water stock, food packets, occupancy, blankets, sanitation, shortages
+Workforce:  volunteers, assignments, shift coverage, medics, transport crews
+Fire:       active alerts, blocked routes, equipment, evacuations, breathing kits
+Flood:      trapped cases, boats, teams, completed rescues, life jackets, rope kits
+```
+
+Shelter and hospital dashboards include facility-management cards. Every coordinator also includes a Pod Network Management card for satellite, cellular, and mesh policy.
 
 ## 10-Pod Topology
 
@@ -92,7 +132,11 @@ curl.exe "http://localhost:9100/set?loss=0"       # weather clears
 
 Pod routing now understands three link states, in strict preference order:
 healthy satellite -> healthy tower -> DEGRADED satellite -> DEGRADED tower ->
-mesh -> island. So when rain fade degrades the satellite, traffic moves to
+mesh -> island. So when rain fade degrades the satellite, traffic can prefer a healthier tower before mesh or island mode.
+
+Pods can also notify nearby coordinators directly over the Docker pod mesh. The `COORDINATOR_INBOXES` environment value maps each pod to role-specific coordinator inboxes. A request only goes to a coordinator if its category or message matches that role, so fire language reaches the fire coordinator, medical language reaches hospital coordinators, shelter/food/water language reaches shelter coordinators, and flood rescue language reaches the flood coordinator.
+
+## Queue And Routing Order
 
 Every citizen SOS is first accepted by that pod's own backend and stored in that pod's persistent queue at `pod-data/pod-XX/queue.json`. The pod sync worker wakes immediately after submission and also runs every 5 seconds.
 
@@ -102,6 +146,8 @@ Every citizen SOS is first accepted by that pod's own backend and stored in that
 4. Otherwise, the SOS remains cached in the local pod queue until satellite, cellular, or mesh becomes available again.
 
 The `satellite`, `celltower-*`, and `cloud-api` containers print a compact request snapshot in their logs when they receive an SOS, so the fallback path is visible during demos.
+
+Coordinator field updates use the same fallback idea. When a coordinator metric changes in the React UI, the backend saves it locally, queues a `coordinator-field-update`, and syncs it through satellite, cellular, or pod mesh. The cloud mirrors those updates in `/api/coordinator-events`; if the update traveled through a pod relay, it is also visible in `/api/requests`.
 
 ## Useful API Commands
 
@@ -129,6 +175,30 @@ View cloud-received requests:
 
 ```powershell
 curl.exe http://localhost:9000/api/requests
+```
+
+View cloud-received coordinator updates:
+
+```powershell
+curl.exe http://localhost:9000/api/coordinator-events
+```
+
+Send a cloud message to all shelter coordinators:
+
+```powershell
+curl.exe -X POST http://localhost:9000/api/coordinator-messages -H "Content-Type: application/json" -d "{\"targetRole\":\"shelter\",\"title\":\"Water stock watch\",\"message\":\"Prioritize drinking water reports from low-ground pods.\",\"severity\":\"high\",\"type\":\"hazard\"}"
+```
+
+Update Shelter A food packets from its UI API:
+
+```powershell
+curl.exe -X PATCH http://localhost:8103/api/coordinator/fields/foodPackets -H "Content-Type: application/json" -d "{\"value\":740}"
+```
+
+Submit a fire-related request at POD-05 and watch it appear in the Fire Coordinator UI:
+
+```powershell
+curl.exe -X POST http://localhost:8005/api/requests -H "Content-Type: application/json" -d "{\"name\":\"Kiran\",\"age\":39,\"phone\":\"+91 90000 11111\",\"category\":\"Rescue\",\"message\":\"Smoke and fire near the evacuation route, one family may be trapped\",\"location\":\"Route 5 checkpoint\"}"
 ```
 
 Fail satellite globally through the simulation controller:
@@ -259,5 +329,6 @@ Reset generated queues, pod display names, and local path settings:
 
 ```powershell
 Remove-Item -Recurse -Force .\pod-data
+Remove-Item -Recurse -Force .\coordinator-data
 docker compose up -d --build
 ```

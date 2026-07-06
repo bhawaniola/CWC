@@ -1,6 +1,7 @@
 ﻿__pycache__/
 *.pyc
 .env
-pod-data/
 node_modules/
 dist/
+pod-data/
+coordinator-data/
