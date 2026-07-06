@@ -17,6 +17,8 @@ const podInfo = {
 
 const HEALTH_POLL_INTERVAL_MS = Number(process.env.HEALTH_POLL_INTERVAL_MS || 5000);
 let healthPollTimer = null;
+let healthPollPromise = null;
+const healthChangeListeners = new Set();
 let lastHealthSignature = "";
 let latestHealthSnapshot = {
   satelliteStatus: "unknown",
@@ -133,6 +135,14 @@ function cloneHealthSnapshot() {
   };
 }
 
+function healthSnapshotAgeMs() {
+  if (!latestHealthSnapshot.checkedAt) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return Date.now() - new Date(latestHealthSnapshot.checkedAt).getTime();
+}
+
 async function pollHealthOnce() {
   const [satelliteStatus, towerStatuses] = await Promise.all([
     readLinkHealth(podInfo.satelliteUrl),
@@ -155,34 +165,61 @@ async function pollHealthOnce() {
   });
 
   if (nextSignature !== lastHealthSignature) {
+    const previousSignature = lastHealthSignature;
     lastHealthSignature = nextSignature;
     console.log(
       `[connectivity] ${podInfo.podId} health poll: satellite=${satelliteStatus}, cellular=${cellularStatus}`
     );
+
+    if (previousSignature) {
+      for (const listener of healthChangeListeners) {
+        listener(cloneHealthSnapshot());
+      }
+    }
   }
 
   return cloneHealthSnapshot();
 }
 
-async function getHealthSnapshot() {
+async function refreshHealthSnapshot() {
+  if (!healthPollPromise) {
+    healthPollPromise = pollHealthOnce().finally(() => {
+      healthPollPromise = null;
+    });
+  }
+
+  return healthPollPromise;
+}
+
+async function getHealthSnapshot(options = {}) {
+  const maxAgeMs = options.maxAgeMs ?? 1500;
+
   if (!latestHealthSnapshot.checkedAt) {
-    return pollHealthOnce();
+    return refreshHealthSnapshot();
+  }
+
+  if (options.forceRefresh && healthSnapshotAgeMs() > maxAgeMs) {
+    return refreshHealthSnapshot();
   }
 
   return cloneHealthSnapshot();
 }
 
-function startHealthPolling() {
+function startHealthPolling(options = {}) {
+  if (typeof options.onChange === "function") {
+    healthChangeListeners.add(options.onChange);
+  }
+
   if (healthPollTimer) {
     return healthPollTimer;
   }
 
-  pollHealthOnce().catch((error) => {
+  refreshHealthSnapshot().catch((error) => {
     console.warn(`[connectivity] ${podInfo.podId} initial health poll failed: ${error.message}`);
   });
 
   healthPollTimer = setInterval(() => {
-    pollHealthOnce().catch((error) => {
+    refreshHealthSnapshot().catch((error) => {
       console.warn(`[connectivity] ${podInfo.podId} health poll failed: ${error.message}`);
     });
   }, HEALTH_POLL_INTERVAL_MS);
@@ -201,48 +238,131 @@ function islandRoute(base) {
   };
 }
 
-async function findMeshRelay(base) {
-  for (const neighborUrl of podInfo.neighbors) {
-    try {
-      const response = await axios.get(`${neighborUrl}/api/pod/status`, {
-        timeout: 1500,
-        headers: {
-          "x-sanjeevani-probe": "direct"
-        }
-      });
-
-      const neighbor = response.data && response.data.data;
-      if (neighbor && neighbor.mode === "cloud") {
-        return {
-          ...base,
-          mode: "mesh-relay",
-          activePath: "mesh",
-          activeLink: null,
-          activeCellTower: null,
-          relayPod: {
-            url: neighborUrl,
-            podId: neighbor.podId,
-            podName: neighbor.podName,
-            region: neighbor.region,
-            cloudPath: neighbor.activePath,
-            activeCellTower: neighbor.activeCellTower || null
-          }
-        };
-      }
-    } catch (error) {
-      console.warn(
-        `[connectivity] ${podInfo.podId} could not inspect neighbor ${neighborUrl}: ${error.message}`
-      );
+function podIdFromNeighborUrl(neighborUrl) {
+  try {
+    const host = new URL(neighborUrl).hostname;
+    const match = host.match(/pod[-_]?(\d+)/i);
+    if (match) {
+      return `POD-${match[1].padStart(2, "0")}`;
     }
+  } catch (error) {
+    // Fall through to a readable URL-based label.
   }
 
-  return null;
+  return neighborUrl;
+}
+
+function buildMeshRelayPods() {
+  return podInfo.neighbors.map((neighborUrl) => ({
+    url: neighborUrl,
+    podId: podIdFromNeighborUrl(neighborUrl),
+    podName: podIdFromNeighborUrl(neighborUrl),
+    region: "neighbor",
+    cloudPath: "unknown",
+    activeCellTower: null
+  }));
+}
+
+async function fetchJson(url, timeoutMs = 2500) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(`timeout of ${timeoutMs}ms exceeded`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function inspectNeighborForRelay(neighborUrl, base) {
+  try {
+    console.log(`[connectivity] ${podInfo.podId} probing mesh neighbor ${neighborUrl}`);
+
+    const response = await fetchJson(`${neighborUrl}/api/pod/relay-candidate`, 2500);
+    const neighbor = response && response.data;
+
+    if (neighbor) {
+      console.log(
+        `[connectivity] ${podInfo.podId} inspected neighbor ${neighbor.podId}: ${neighbor.mode}/${neighbor.activePath}, cellular=${neighbor.cellularStatus}, tower=${neighbor.activeCellTower || "none"}`
+      );
+    }
+
+    if (!neighbor || neighbor.mode !== "cloud") {
+      throw new Error(`${neighbor?.podId || neighborUrl} has no direct cloud path`);
+    }
+
+    console.log(
+      `[connectivity] ${podInfo.podId} selected ${neighbor.podId} as mesh relay via ${neighbor.activePath}`
+    );
+
+    return {
+      ...base,
+      mode: "mesh-relay",
+      activePath: "mesh",
+      activeLink: null,
+      activeCellTower: null,
+      relayPod: {
+        url: neighborUrl,
+        podId: neighbor.podId,
+        podName: neighbor.podName,
+        region: neighbor.region,
+        cloudPath: neighbor.activePath,
+        activeCellTower: neighbor.activeCellTower || null
+      }
+    };
+  } catch (error) {
+    console.warn(
+      `[connectivity] ${podInfo.podId} could not use neighbor ${neighborUrl}: ${error.message}`
+    );
+    throw error;
+  }
+}
+
+async function findMeshRelay(base) {
+  const relayPods = buildMeshRelayPods();
+
+  if (relayPods.length === 0) {
+    return null;
+  }
+
+  console.log(
+    `[connectivity] ${podInfo.podId} using direct pod-mesh links to ${relayPods
+      .map((pod) => pod.podId)
+      .join(", ")}`
+  );
+
+  return {
+    ...base,
+    mode: "mesh-relay",
+    activePath: "mesh",
+    activeLink: null,
+    activeCellTower: null,
+    relayPod: relayPods[0],
+    relayPods
+  };
 }
 
 async function calculateMode(options = {}) {
   const allowMeshRelay = options.allowMeshRelay !== false;
   const networkState = localQueue.getNetworkState();
-  const healthSnapshot = await getHealthSnapshot();
+  const healthSnapshot = await getHealthSnapshot({
+    forceRefresh: options.forceRefresh !== false,
+    maxAgeMs: options.maxAgeMs ?? 250
+  });
   const satelliteStatus = healthSnapshot.satelliteStatus;
   const towerStatuses = healthSnapshot.cellTowerStatuses;
   const cellularStatus = healthSnapshot.cellularStatus;
@@ -311,6 +431,7 @@ async function buildPodStatus(options = {}) {
     activePath: route.activePath,
     activeCellTower: route.activeCellTower,
     relayPod: route.relayPod,
+    relayPods: route.relayPods || [],
     satelliteStatus: route.satelliteStatus,
     cellularStatus: route.cellularStatus,
     cellTowerStatuses: route.cellTowerStatuses,
@@ -321,6 +442,29 @@ async function buildPodStatus(options = {}) {
     connectedTowers: podInfo.connectedTowers,
     neighbors: podInfo.neighbors,
     ciscoSimulation
+  };
+}
+
+async function buildRelayCandidate() {
+  const route = await calculateMode({
+    allowMeshRelay: false,
+    forceRefresh: false,
+    maxAgeMs: HEALTH_POLL_INTERVAL_MS
+  });
+  const identity = getPodIdentity();
+
+  return {
+    podId: identity.podId,
+    podName: identity.podName,
+    region: identity.region,
+    mode: route.mode,
+    activePath: route.activePath,
+    activeCellTower: route.activeCellTower,
+    satelliteStatus: route.satelliteStatus,
+    cellularStatus: route.cellularStatus,
+    cellTowerStatuses: route.cellTowerStatuses,
+    healthLastCheckedAt: route.healthLastCheckedAt,
+    connectedTowers: podInfo.connectedTowers
   };
 }
 
@@ -346,10 +490,45 @@ async function sendSecurityEvent(event) {
 }
 
 async function sendToRelay(relayUrl, request) {
-  const response = await axios.post(`${normalizeUrl(relayUrl)}/api/relay`, request, {
-    timeout: 3000
-  });
-  return response.data;
+  const timeoutMs = 5000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${normalizeUrl(relayUrl)}/api/mesh/inbox`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(request),
+      signal: controller.signal
+    });
+
+    const responseText = await response.text();
+    let data = {};
+
+    if (responseText) {
+      try {
+        data = JSON.parse(responseText);
+      } catch (error) {
+        data = { raw: responseText };
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(data.message || `Mesh inbox returned HTTP ${response.status}`);
+    }
+
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(`mesh inbox timeout after ${timeoutMs}ms`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function proxyInfra(path) {
@@ -362,6 +541,7 @@ async function proxyInfra(path) {
 }
 
 module.exports = {
+  buildRelayCandidate,
   buildPodStatus,
   calculateMode,
   ciscoSimulation,

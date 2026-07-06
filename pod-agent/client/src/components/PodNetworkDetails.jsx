@@ -1,4 +1,7 @@
+import { useState } from "react";
 import { FiActivity, FiClock, FiCloud, FiGitBranch, FiRadio, FiServer } from "react-icons/fi";
+
+import { updateNetworkPath } from "../api/podApi";
 
 function titleCase(value) {
   return String(value || "checking")
@@ -55,10 +58,53 @@ function RouteSummary({ status }) {
   return "Island mode: requests are cached locally";
 }
 
-export default function PodNetworkDetails({ status }) {
+const routingPolicies = [
+  {
+    path: "satellite",
+    stateKey: "satelliteEnabled",
+    label: "Satellite",
+    Icon: FiCloud
+  },
+  {
+    path: "cellular",
+    stateKey: "cellularEnabled",
+    label: "Cellular",
+    Icon: FiRadio
+  },
+  {
+    path: "mesh",
+    stateKey: "meshEnabled",
+    label: "Mesh",
+    Icon: FiGitBranch
+  }
+];
+
+export default function PodNetworkDetails({ status, onStatusChange }) {
+  const [pendingPath, setPendingPath] = useState("");
+  const [policyMessage, setPolicyMessage] = useState("");
   const networkState = status?.networkState || {};
   const towers = status?.cellTowerStatuses || [];
   const relayPod = status?.relayPod;
+
+  async function handlePolicyToggle(policy) {
+    const currentlyEnabled = networkState[policy.stateKey] !== false;
+    setPendingPath(policy.path);
+    setPolicyMessage("");
+
+    try {
+      const result = await updateNetworkPath(policy.path, !currentlyEnabled);
+      onStatusChange?.({
+        ...status,
+        ...result.data,
+        networkState: result.data.networkState
+      });
+      setPolicyMessage(`${policy.label} ${currentlyEnabled ? "disabled" : "enabled"} locally.`);
+    } catch (error) {
+      setPolicyMessage(error.message);
+    } finally {
+      setPendingPath("");
+    }
+  }
 
   return (
     <section className="network-details-card">
@@ -139,22 +185,33 @@ export default function PodNetworkDetails({ status }) {
       </div>
 
       <div className="routing-policy-grid">
-        <div>
-          <FiCloud aria-hidden="true" />
-          <span>Satellite</span>
-          <strong>{networkState.satelliteEnabled === false ? "Disabled" : "Enabled"}</strong>
-        </div>
-        <div>
-          <FiRadio aria-hidden="true" />
-          <span>Cellular</span>
-          <strong>{networkState.cellularEnabled === false ? "Disabled" : "Enabled"}</strong>
-        </div>
-        <div>
-          <FiGitBranch aria-hidden="true" />
-          <span>Mesh</span>
-          <strong>{networkState.meshEnabled === false ? "Disabled" : "Enabled"}</strong>
-        </div>
+        {routingPolicies.map((policy) => {
+          const enabled = networkState[policy.stateKey] !== false;
+          const Icon = policy.Icon;
+          const isPending = pendingPath === policy.path;
+
+          return (
+            <button
+              aria-pressed={enabled}
+              className={`routing-policy-card ${enabled ? "enabled" : "disabled"}`}
+              disabled={Boolean(pendingPath)}
+              key={policy.path}
+              type="button"
+              onClick={() => handlePolicyToggle(policy)}
+            >
+              <Icon aria-hidden="true" />
+              <span>{policy.label}</span>
+              <strong>{isPending ? "Updating" : enabled ? "Enabled" : "Disabled"}</strong>
+              <small>{enabled ? "Tap to disable" : "Tap to enable"}</small>
+              <em aria-hidden="true">
+                <i />
+              </em>
+            </button>
+          );
+        })}
       </div>
+
+      {policyMessage ? <p className="policy-message">{policyMessage}</p> : null}
 
       <div className="relay-strip">
         <FiServer aria-hidden="true" />

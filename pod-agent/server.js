@@ -32,7 +32,22 @@ const syncWorker = startSyncWorker({
   podInfo: connectivity.podInfo
 });
 
-connectivity.startHealthPolling();
+function triggerQueueSync(trigger) {
+  setTimeout(() => {
+    syncWorker.syncOnce(trigger).catch((error) => {
+      console.warn(`[pod-agent] ${connectivity.podInfo.podId} sync trigger failed: ${error.message}`);
+    });
+  }, 250);
+}
+
+connectivity.startHealthPolling({
+  onChange: (snapshot) => {
+    console.log(
+      `[pod-agent] ${connectivity.podInfo.podId} health changed; waking queue sync (satellite=${snapshot.satelliteStatus}, cellular=${snapshot.cellularStatus})`
+    );
+    triggerQueueSync("health-change");
+  }
+});
 
 function requireManagerAccess(req, res, next) {
   if (req.header("x-manager-token") === MANAGER_API_KEY) {
@@ -101,6 +116,7 @@ function createRequest(body, route) {
       activePath: route.activePath,
       activeCellTower: route.activeCellTower,
       relayPod: route.relayPod,
+      relayPods: route.relayPods || [],
       satelliteStatus: route.satelliteStatus,
       cellularStatus: route.cellularStatus,
       cellTowerStatuses: route.cellTowerStatuses,
@@ -137,6 +153,50 @@ function queueLocal(request, syncStatus) {
   return queuedRequest;
 }
 
+function hasMeshHopVisitedPod(incoming, podId) {
+  if (incoming.podId === podId || incoming.relayedBy?.podId === podId) {
+    return true;
+  }
+
+  if (!Array.isArray(incoming.relayTrail)) {
+    return false;
+  }
+
+  return incoming.relayTrail.some((hop) => hop?.podId === podId);
+}
+
+function buildMeshInboxRequest(incoming) {
+  const identity = connectivity.getPodIdentity();
+  const receivedAt = new Date().toISOString();
+  const existingTrail = Array.isArray(incoming.relayTrail) ? incoming.relayTrail : [];
+
+  return {
+    ...incoming,
+    relayTrail: [
+      ...existingTrail,
+      {
+        podId: identity.podId,
+        podName: identity.podName,
+        region: identity.region,
+        receivedAt
+      }
+    ],
+    relayedBy: {
+      podId: identity.podId,
+      podName: identity.podName,
+      region: identity.region,
+      receivedAt
+    },
+    network: {
+      ...(incoming.network || {}),
+      meshInboxPod: identity.podId,
+      meshInboxPodName: identity.podName,
+      meshInboxReceivedAt: receivedAt,
+      meshLinkFrom: incoming.meshLink?.fromPodId || incoming.podId || "unknown-pod"
+    }
+  };
+}
+
 function responseForRequest(message, request, route) {
   return {
     success: true,
@@ -146,13 +206,27 @@ function responseForRequest(message, request, route) {
       mode: route.mode,
       activePath: route.activePath,
       activeCellTower: route.activeCellTower,
-      relayPod: route.relayPod
+      relayPod: route.relayPod,
+      relayPods: route.relayPods || []
     }
   };
 }
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(staticPath, "index.html"));
+});
+
+app.get("/api/pod/relay-candidate", async (req, res) => {
+  const candidate = await connectivity.buildRelayCandidate();
+
+  console.log(
+    `[pod-agent] ${candidate.podId} relay candidate check: ${candidate.mode}/${candidate.activePath}, cellular=${candidate.cellularStatus}, tower=${candidate.activeCellTower || "none"}`
+  );
+
+  res.json({
+    success: true,
+    data: candidate
+  });
 });
 
 app.get("/api/pod/status", async (req, res) => {
@@ -306,149 +380,72 @@ app.post("/api/requests", async (req, res) => {
   }
 
   const route = await connectivity.calculateMode();
-  let request = createRequest(req.body, route);
+  const request = createRequest(req.body, route);
 
   console.log(
-    `[pod-agent] ${connectivity.podInfo.podId} received ${request.id} in mode ${route.mode}`
+    `[pod-agent] ${connectivity.podInfo.podId} received ${request.id}; queued locally before sync`
   );
 
-  if (route.mode === "cloud") {
-    try {
-      request = {
-        ...request,
-        syncStatus:
-          route.activePath === "cellular" ? "synced-via-cellular" : "synced-via-satellite",
-        syncedAt: new Date().toISOString()
-      };
-      await connectivity.forwardViaRoute(route, request);
-      console.log(
-        `[pod-agent] ${connectivity.podInfo.podId} sent ${request.id} to cloud using ${route.activePath}`
-      );
-      return res
-        .status(201)
-        .json(responseForRequest(`Request synced to cloud using ${route.activePath}.`, request, route));
-    } catch (error) {
-      const queuedRequest = queueLocal(request, "queued-after-cloud-failure");
-      return res
-        .status(202)
-        .json(
-          responseForRequest(
-            "Request cached locally because cloud sync failed.",
-            queuedRequest,
-            route
-          )
-        );
-    }
-  }
+  const queuedRequest = queueLocal(request, "queued-at-origin-pod");
+  triggerQueueSync("submission");
 
-  if (route.mode === "mesh-relay" && route.relayPod) {
-    try {
-      const relayRequest = {
-        ...request,
-        syncStatus: "relayed-via-mesh",
-        relayedAt: new Date().toISOString()
-      };
-      const relayResponse = await connectivity.sendToRelay(route.relayPod.url, relayRequest);
-      console.log(
-        `[pod-agent] ${connectivity.podInfo.podId} relayed ${request.id} through ${route.relayPod.podId}`
-      );
-      return res.status(201).json({
-        ...responseForRequest("Request relayed through neighboring pod.", relayRequest, route),
-        relayResponse
-      });
-    } catch (error) {
-      const queuedRequest = queueLocal(request, "queued-after-relay-failure");
-      return res
-        .status(202)
-        .json(
-          responseForRequest(
-            "Request cached locally because mesh relay failed.",
-            queuedRequest,
-            route
-          )
-        );
-    }
-  }
-
-  const queuedRequest = queueLocal(request, "queued-island");
-  return res
-    .status(202)
-    .json(responseForRequest("Request cached locally in island mode.", queuedRequest, route));
+  return res.status(202).json(
+    responseForRequest(
+      "Request queued at this pod. Sync worker will try satellite, cellular, then pod mesh.",
+      queuedRequest,
+      route
+    )
+  );
 });
 
-app.post("/api/relay", async (req, res) => {
+function acceptMeshInbox(req, res) {
   const incoming = req.body || {};
 
   if (!incoming.id) {
     return res.status(400).json({
       success: false,
-      message: "Relayed request must include an id."
+      message: "Mesh request must include an id."
     });
   }
 
-  const directRoute = await connectivity.calculateMode({ allowMeshRelay: false });
   const identity = connectivity.getPodIdentity();
-  const relayedRequest = {
-    ...incoming,
-    relayedBy: {
-      podId: identity.podId,
-      podName: identity.podName,
-      region: identity.region,
-      receivedAt: new Date().toISOString()
-    },
-    network: {
-      ...(incoming.network || {}),
-      relayHandledBy: identity.podId,
-      relayCloudPath: directRoute.activePath,
-      relayActiveCellTower: directRoute.activeCellTower,
-      relaySatelliteStatus: directRoute.satelliteStatus,
-      relayCellularStatus: directRoute.cellularStatus,
-      relayNetworkState: directRoute.networkState
-    }
-  };
+  const sourcePod = incoming.meshLink?.fromPodId || incoming.podId || "unknown-pod";
 
-  console.log(
-    `[pod-agent] ${connectivity.podInfo.podId} received relay ${incoming.id} from ${
-      incoming.podId || "unknown-pod"
-    }`
-  );
+  if (hasMeshHopVisitedPod(incoming, identity.podId)) {
+    console.log(
+      `[pod-agent] ${identity.podId} ignored mesh ${incoming.id} from ${sourcePod}; pod already visited`
+    );
 
-  if (directRoute.mode === "cloud") {
-    try {
-      const syncedRequest = {
-        ...relayedRequest,
-        syncStatus:
-          directRoute.activePath === "cellular"
-            ? "synced-via-relay-cellular"
-            : "synced-via-relay-satellite",
-        syncedAt: new Date().toISOString()
-      };
-      await connectivity.forwardViaRoute(directRoute, syncedRequest);
-      console.log(
-        `[pod-agent] ${connectivity.podInfo.podId} forwarded relay ${incoming.id} to cloud`
-      );
-      return res.status(201).json({
-        success: true,
-        message: `Relay pod forwarded request to cloud using ${directRoute.activePath}.`,
-        data: syncedRequest
-      });
-    } catch (error) {
-      const queuedAtRelay = queueLocal(relayedRequest, "queued-at-relay");
-      return res.status(202).json({
-        success: true,
-        message: "Relay pod cached request because cloud forwarding failed.",
-        data: queuedAtRelay
-      });
-    }
+    return res.status(202).json({
+      success: true,
+      message: "Mesh inbox skipped request because this pod already saw it.",
+      data: {
+        id: incoming.id,
+        skipped: true,
+        podId: identity.podId
+      }
+    });
   }
 
-  const queuedAtRelay = queueLocal(relayedRequest, "queued-at-relay");
-  return res.status(202).json({
+  const relayedRequest = buildMeshInboxRequest(incoming);
+
+  console.log(
+    `[pod-agent] ${identity.podId} mesh inbox accepted ${incoming.id} directly from ${sourcePod}`
+  );
+
+  const queuedAtRelay = queueLocal(relayedRequest, "queued-at-mesh-inbox");
+
+  res.status(202).json({
     success: true,
-    message: "Relay pod has no direct cloud path, so the request is queued at relay.",
+    message: "Mesh inbox accepted request and queued it for local sync.",
     data: queuedAtRelay
   });
-});
+
+  triggerQueueSync("mesh-inbox");
+}
+
+app.post("/api/mesh/inbox", acceptMeshInbox);
+app.post("/api/relay", acceptMeshInbox);
 
 app.get("/api/queue", (req, res) => {
   const queue = localQueue.getQueue();

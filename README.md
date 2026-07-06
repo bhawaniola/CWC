@@ -12,14 +12,15 @@ Pods do not post directly to the cloud. A pod must forward through the satellite
 |-- cloud-api/                 # central cloud receiver on port 9000
 |-- link-node/                 # shared satellite and celltower service image
 |-- simulation-controller/     # global Docker stop/start controller on port 9300
-|-- pod-agent/                 # shared pod backend and plain HTML/CSS/JS UI
-|   |-- public/                # citizen/operator frontend
+|-- pod-agent/                 # shared pod backend and React/Vite citizen SOS UI
+|   |-- client/                # modular React frontend source
+|   |-- public/                # legacy static fallback
 |   `-- services/              # routing, queue, settings, hazard, triage modules
 |-- integrations/              # optional external demo feeders
 `-- pod-data/                  # generated runtime state, ignored by git
 ```
 
-Removed from the active architecture: the old root `control-center`, old `pod-simulator`, nested pod network folder, duplicate pod agents, relay folder, and React/Vite pod UI.
+Removed from the active architecture: the old root `control-center`, old `pod-simulator`, nested pod network folder, duplicate pod agents, and relay folder.
 
 ## Run
 
@@ -70,12 +71,16 @@ POD-10: no cell tower, neighbors POD-08/POD-09
 
 Every pod has satellite configured. Local pod controls can disable satellite/cellular/mesh for only that pod. Global infrastructure controls fail or restore the shared satellite/celltower services for all pods.
 
-## Routing Order
+## Queue And Routing Order
 
-1. Satellite link is enabled locally and globally up: forward to `satellite -> cloud-api`.
-2. Otherwise, cellular is enabled locally and a configured tower is up: forward to `celltower-* -> cloud-api`.
-3. Otherwise, mesh is enabled and a neighbor has cloud route: relay to that neighbor.
-4. Otherwise, cache locally in `pod-data/pod-XX/queue.json`.
+Every citizen SOS is first accepted by that pod's own backend and stored in that pod's persistent queue at `pod-data/pod-XX/queue.json`. The pod sync worker wakes immediately after submission and also runs every 5 seconds.
+
+1. If satellite is enabled locally and globally up, the queued SOS is sent to `satellite -> cloud-api`.
+2. Otherwise, if cellular is enabled locally and a configured tower is up, it is sent to `celltower-* -> cloud-api`.
+3. Otherwise, if mesh is enabled and a surrounding pod has a direct cloud route, it is relayed to that neighbor. The surrounding pod adds it to its own queue and its sync worker forwards it.
+4. Otherwise, the SOS remains cached in the local pod queue until satellite, cellular, or mesh becomes available again.
+
+The `satellite`, `celltower-*`, and `cloud-api` containers print a compact request snapshot in their logs when they receive an SOS, so the fallback path is visible during demos.
 
 ## Useful API Commands
 
@@ -96,6 +101,8 @@ Submit an SOS to POD-01:
 ```powershell
 curl.exe -X POST http://localhost:8001/api/requests -H "Content-Type: application/json" -d "{\"name\":\"Ramesh Kumar\",\"age\":68,\"phone\":\"+91 9876543210\",\"category\":\"Medical\",\"message\":\"My grandfather needs insulin and cannot walk\",\"location\":\"Kothapalli Zone 3\"}"
 ```
+
+The API returns `202 Accepted` after the SOS is queued at the pod. The worker then syncs it through satellite, cellular, mesh, or keeps it cached.
 
 View cloud-received requests:
 

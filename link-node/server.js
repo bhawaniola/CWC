@@ -24,6 +24,23 @@ function statusPayload(success = true) {
   };
 }
 
+function requestSnapshot(request) {
+  return {
+    id: request.id || "unknown-request",
+    podId: request.podId || "unknown-pod",
+    podName: request.podName || "",
+    category: request.category || "",
+    location: request.location || "",
+    language: request.language?.name || request.language?.code || "",
+    syncStatus: request.syncStatus || "",
+    route: request.network?.syncPath || request.network?.activePath || LINK_TYPE,
+    relayTrail: Array.isArray(request.relayTrail)
+      ? request.relayTrail.map((item) => item.podId).filter(Boolean)
+      : [],
+    createdAt: request.createdAt || ""
+  };
+}
+
 app.get("/health", (req, res) => {
   return res.json(statusPayload(true));
 });
@@ -39,6 +56,13 @@ app.post("/api/forward", async (req, res) => {
     linkType: LINK_TYPE,
     forwardedAt: new Date().toISOString()
   };
+
+  console.log(
+    `[link-node] ${LINK_ID} received ${forwardedRequest.id || "unknown-request"} from ${
+      forwardedRequest.podId || "unknown-pod"
+    }`
+  );
+  console.log(`[link-node] ${LINK_ID} payload ${JSON.stringify(requestSnapshot(forwardedRequest))}`);
 
   try {
     const response = await axios.post(`${CLOUD_URL}/api/requests`, forwardedRequest, {

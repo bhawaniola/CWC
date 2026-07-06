@@ -8,6 +8,25 @@ export async function fetchPodStatus(signal) {
   return response.json();
 }
 
+export async function updateNetworkPath(pathName, enabled) {
+  const action = enabled ? "enable" : "disable";
+  const response = await fetch(`/api/network/${pathName}/${action}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({})
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(result.message || "Unable to update network policy.");
+  }
+
+  return result;
+}
+
 export async function submitSosRequest(payload) {
   const response = await fetch("/api/requests", {
     method: "POST",

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchPodStatus } from "./api/podApi";
 import EmergencyRequestForm from "./components/EmergencyRequestForm.jsx";
@@ -16,28 +16,28 @@ function SanjeevaniApp() {
   const [podStatus, setPodStatus] = useState(null);
   const initializedPodLocationRef = useRef(null);
 
+  const refreshPodStatus = useCallback(async (signal) => {
+    try {
+      const result = await fetchPodStatus(signal);
+      setPodStatus(result.data);
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        setPodStatus(null);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
 
-    async function refreshPodStatus() {
-      try {
-        const result = await fetchPodStatus(controller.signal);
-        setPodStatus(result.data);
-      } catch (error) {
-        if (error.name !== "AbortError") {
-          setPodStatus(null);
-        }
-      }
-    }
-
-    refreshPodStatus();
-    const interval = window.setInterval(refreshPodStatus, 5000);
+    refreshPodStatus(controller.signal);
+    const interval = window.setInterval(() => refreshPodStatus(controller.signal), 5000);
 
     return () => {
       controller.abort();
       window.clearInterval(interval);
     };
-  }, []);
+  }, [refreshPodStatus]);
 
   useEffect(() => {
     if (!podStatus?.podId || initializedPodLocationRef.current === podStatus.podId) {
@@ -67,7 +67,7 @@ function SanjeevaniApp() {
         />
         <div className="side-column">
           <LocationSelector location={location} onChange={setLocation} />
-          <PodNetworkDetails status={podStatus} />
+          <PodNetworkDetails status={podStatus} onStatusChange={setPodStatus} />
         </div>
       </section>
 

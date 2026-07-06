@@ -8,65 +8,181 @@
   </head>
   <body>
     <header class="topbar">
-      <div>
-        <p class="eyebrow">SANJEEVANI controller</p>
-        <h1>Global infrastructure control</h1>
-        <p class="subtitle">Stop or start the actual satellite and cell tower Docker containers from one place.</p>
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" role="img">
+            <path d="M12 3.25 4.75 7.2v8.15L12 20.75l7.25-5.4V7.2L12 3.25Z"></path>
+            <path d="M8.5 12.2h7M12 8.7v7"></path>
+          </svg>
+        </div>
+        <div>
+          <p class="eyebrow">SANJEEVANI controller</p>
+          <h1>Simulation Command Center</h1>
+          <p class="subtitle">Control satellite and cellular Docker containers, then watch the 10-pod mesh reroute SOS traffic.</p>
+        </div>
       </div>
-      <button id="refresh" type="button">Refresh</button>
+      <div class="topbar-actions">
+        <div class="status-summary">
+          <span>Network mode</span>
+          <strong id="infraSummary">Checking links</strong>
+        </div>
+        <button id="refresh" class="icon-button" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 11a8.1 8.1 0 0 0-14.3-5M4 5v5h5"></path>
+            <path d="M4 13a8.1 8.1 0 0 0 14.3 5M20 19v-5h-5"></path>
+          </svg>
+          Refresh
+        </button>
+      </div>
     </header>
 
     <main class="shell">
+      <section class="hero-panel">
+        <div>
+          <p class="eyebrow">Live drill board</p>
+          <h2>Fail infrastructure, prove resilient routing.</h2>
+          <p>Pods always queue SOS locally first. When a direct cloud path is unavailable, the simulator shows how the request moves through satellite, cellular, and pod mesh links.</p>
+        </div>
+        <div class="hero-metrics" aria-label="Simulation highlights">
+          <div>
+            <span>Pods</span>
+            <strong>10</strong>
+          </div>
+          <div>
+            <span>Backhaul links</span>
+            <strong>3</strong>
+          </div>
+          <div>
+            <span>Health poll</span>
+            <strong>5s</strong>
+          </div>
+        </div>
+      </section>
+
       <section class="link-grid" aria-live="polite">
         <article class="link-card" data-link="satellite">
-          <div>
-            <span>Satellite</span>
+          <div class="link-card-top">
+            <div class="link-icon satellite-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M6.5 9.5 10 6l8 8-3.5 3.5-8-8Z"></path>
+                <path d="m8 11-4 4m9-9 4-4m-3 18a8 8 0 0 0-10-10"></path>
+              </svg>
+            </div>
+            <div>
+              <span>Satellite link</span>
+              <small>Global NTN backhaul</small>
+            </div>
+          </div>
+          <div class="link-state">
             <strong id="satelliteStatus">-</strong>
             <small id="satelliteDocker">container: -</small>
           </div>
           <div class="actions">
-            <button type="button" data-link-action="fail" data-link-key="satellite">Stop container</button>
-            <button type="button" data-link-action="restore" data-link-key="satellite">Start container</button>
+            <button class="danger-action" type="button" data-link-action="fail" data-link-key="satellite">
+              <span aria-hidden="true"></span>
+              Stop
+            </button>
+            <button class="safe-action" type="button" data-link-action="restore" data-link-key="satellite">
+              <span aria-hidden="true"></span>
+              Start
+            </button>
           </div>
         </article>
 
         <article class="link-card" data-link="celltower-1">
-          <div>
-            <span>CELLTOWER-1</span>
+          <div class="link-card-top">
+            <div class="link-icon tower-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M12 3v18M7 21h10M8 7a6 6 0 0 1 8 0M5 4a10 10 0 0 1 14 0"></path>
+                <path d="m9 21 3-8 3 8"></path>
+              </svg>
+            </div>
+            <div>
+              <span>CELLTOWER-1</span>
+              <small>West and central pods</small>
+            </div>
+          </div>
+          <div class="link-state">
             <strong id="celltower1Status">-</strong>
             <small id="celltower1Docker">container: -</small>
           </div>
           <div class="actions">
-            <button type="button" data-link-action="fail" data-link-key="celltower-1">Stop container</button>
-            <button type="button" data-link-action="restore" data-link-key="celltower-1">Start container</button>
+            <button class="danger-action" type="button" data-link-action="fail" data-link-key="celltower-1">
+              <span aria-hidden="true"></span>
+              Stop
+            </button>
+            <button class="safe-action" type="button" data-link-action="restore" data-link-key="celltower-1">
+              <span aria-hidden="true"></span>
+              Start
+            </button>
           </div>
         </article>
 
         <article class="link-card" data-link="celltower-2">
-          <div>
-            <span>CELLTOWER-2</span>
+          <div class="link-card-top">
+            <div class="link-icon tower-icon alt" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M12 3v18M7 21h10M8 7a6 6 0 0 1 8 0M5 4a10 10 0 0 1 14 0"></path>
+                <path d="m9 21 3-8 3 8"></path>
+              </svg>
+            </div>
+            <div>
+              <span>CELLTOWER-2</span>
+              <small>East and relay-side pods</small>
+            </div>
+          </div>
+          <div class="link-state">
             <strong id="celltower2Status">-</strong>
             <small id="celltower2Docker">container: -</small>
           </div>
           <div class="actions">
-            <button type="button" data-link-action="fail" data-link-key="celltower-2">Stop container</button>
-            <button type="button" data-link-action="restore" data-link-key="celltower-2">Start container</button>
+            <button class="danger-action" type="button" data-link-action="fail" data-link-key="celltower-2">
+              <span aria-hidden="true"></span>
+              Stop
+            </button>
+            <button class="safe-action" type="button" data-link-action="restore" data-link-key="celltower-2">
+              <span aria-hidden="true"></span>
+              Start
+            </button>
           </div>
         </article>
       </section>
 
-      <section class="panel">
-        <h2>Controller API</h2>
-        <pre>GET  /api/infra/status
-POST /api/infra/satellite/fail
-POST /api/infra/satellite/restore
-POST /api/infra/celltower-1/fail
-POST /api/infra/celltower-1/restore
-POST /api/infra/celltower-2/fail
-POST /api/infra/celltower-2/restore</pre>
+      <section class="panel topology-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">10-pod topology</p>
+            <h2>Cell tower coverage and pod mesh links</h2>
+          </div>
+          <p>Every pod has satellite fallback. Cellular and mesh paths below are used when direct links fail.</p>
+        </div>
+
+        <div id="topologyStats" class="topology-stats" aria-label="Topology summary"></div>
+
+        <div class="topology-grid">
+          <article class="topology-card">
+            <h3>Cell tower coverage</h3>
+            <div id="towerTopology" class="tower-topology" aria-live="polite"></div>
+          </article>
+
+          <article class="topology-card">
+            <h3>Pod mesh interconnections</h3>
+            <div id="meshTopology" class="mesh-topology"></div>
+          </article>
+        </div>
+
+        <article class="topology-card pod-connection-card">
+          <h3>Per-pod cell tower and neighbor map</h3>
+          <div id="podConnectionMap" class="pod-connection-map"></div>
+        </article>
       </section>
 
-      <div id="notice" class="notice" role="status"></div>
+      
+
+      <div class="notice-row">
+        <div id="notice" class="notice" role="status"></div>
+        <div class="last-updated">Last checked: <strong id="lastUpdated">-</strong></div>
+      </div>
     </main>
 
     <script src="/app.js"></script>
