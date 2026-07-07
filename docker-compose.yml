@@ -279,6 +279,28 @@ services:
     networks:
       - sanjeevani-net
 
+  sensor-simulator:
+    build: ./sensor-simulator
+    container_name: sanjeevani-sensor-simulator
+    depends_on:
+      - pod-01
+      - pod-02
+      - pod-03
+      - pod-04
+      - pod-05
+      - pod-06
+      - pod-07
+      - pod-08
+      - pod-09
+      - pod-10
+    ports:
+      - "9400:9400"
+    environment:
+      PORT: 9400
+      TICK_MS: 4000
+    networks:
+      - sanjeevani-net
+
 networks:
   sanjeevani-net:
     name: sanjeevani-net

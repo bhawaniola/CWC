@@ -148,6 +148,25 @@
         </article>
       </section>
 
+      <section class="panel sensor-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Live sensor feed</p>
+            <h2>Simulated Meraki sensor readings</h2>
+          </div>
+          <p>Each pod's simulated MT-style sensor posts a fresh reading every few seconds. Use Spike to ramp a reading toward its hazard threshold live, right from here.</p>
+        </div>
+
+        <div id="sensorNotice" class="sensor-notice" role="status" hidden></div>
+
+        <div id="sensorGrid" class="sensor-grid" aria-live="polite"></div>
+
+        <article class="topology-card button-panel">
+          <h3>MT30 help buttons</h3>
+          <div id="buttonGrid" class="button-grid"></div>
+        </article>
+      </section>
+
       <section class="panel topology-panel">
         <div class="section-heading">
           <div>

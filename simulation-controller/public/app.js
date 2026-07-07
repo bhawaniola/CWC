@@ -384,3 +384,204 @@ document.querySelectorAll("[data-link-action]").forEach((button) => {
 renderTopology();
 loadStatus().catch((error) => setNotice("error", error.message));
 setInterval(() => loadStatus().catch(() => {}), 3000);
+
+// --- Live sensor feed --------------------------------------------------
+// sensor-simulator is a separate container, but its port is published to
+// the host (see docker-compose.yml "9400:9400"), so this page's own JS can
+// call it directly at localhost:9400 - no proxy route needed on this
+// server. Thresholds below are copied from pod-agent's hazardPackService.js
+// purely for the "normal/warning/critical" badge - they don't change any
+// alerting logic, that still happens on the pod side.
+
+const SENSOR_API_BASE = "http://localhost:9400";
+
+const HAZARD_THRESHOLDS = {
+  water_level: 150,
+  shake_g: 0.4,
+  temperature: 45
+};
+
+const SENSOR_LABELS = {
+  water_level: "Water level",
+  shake_g: "Ground shake",
+  temperature: "Temperature"
+};
+
+const UNIT_DISPLAY = {
+  celsius: "°C",
+  cm: "cm",
+  g: "g"
+};
+
+const SPIKE_STEP_BY_SENSOR = {
+  water_level: 20,
+  shake_g: 0.08,
+  temperature: 5
+};
+
+const sensorElements = {
+  notice: document.getElementById("sensorNotice"),
+  grid: document.getElementById("sensorGrid"),
+  buttons: document.getElementById("buttonGrid")
+};
+
+function sensorStatusFor(sensor, value) {
+  const threshold = HAZARD_THRESHOLDS[sensor];
+  if (!threshold) {
+    return "normal";
+  }
+  if (value >= threshold) {
+    return "critical";
+  }
+  if (value >= threshold * 0.8) {
+    return "warning";
+  }
+  return "normal";
+}
+
+function setSensorNotice(kind, message) {
+  if (!sensorElements.notice) {
+    return;
+  }
+  if (!message) {
+    sensorElements.notice.hidden = true;
+    sensorElements.notice.textContent = "";
+    return;
+  }
+  sensorElements.notice.hidden = false;
+  sensorElements.notice.className = `sensor-notice ${kind || ""}`;
+  sensorElements.notice.textContent = message;
+}
+
+async function sensorApi(path, options = {}) {
+  const response = await fetch(`${SENSOR_API_BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...options
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.message || "Sensor simulator request failed.");
+  }
+  return data;
+}
+
+function renderSensors(payload) {
+  const stations = payload.stations || [];
+  const buttons = payload.buttons || [];
+
+  sensorElements.grid.innerHTML = stations
+    .map((station) => {
+      const status = sensorStatusFor(station.sensor, station.value);
+      const decimals = station.sensor === "shake_g" ? 3 : 1;
+      const displayValue = Number(station.value).toFixed(decimals);
+      const unit = UNIT_DISPLAY[station.unit] || station.unit;
+      const label = SENSOR_LABELS[station.sensor] || station.sensor;
+
+      return `
+        <article class="sensor-card" data-status="${status}">
+          <div class="sensor-card-top">
+            <div>
+              <strong>${station.podId}</strong>
+              <small>${station.podName}</small>
+            </div>
+            <span class="sensor-badge">${status}</span>
+          </div>
+          <div class="sensor-value">${displayValue}<span>${unit}</span></div>
+          <div class="sensor-meta">${label} · ${station.model}</div>
+          <div class="sensor-actions">
+            <button type="button" data-sensor-action="spike" data-pod-id="${station.podId}" data-sensor="${station.sensor}">Spike</button>
+            <button type="button" data-sensor-action="reset" data-pod-id="${station.podId}" data-sensor="${station.sensor}">Reset</button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+
+  sensorElements.buttons.innerHTML = buttons
+    .map(
+      (button) => `
+        <article class="button-card">
+          <strong>${button.podId}</strong>
+          <small>${button.podName} · MT30 button</small>
+          <button type="button" data-sensor-action="press" data-pod-id="${button.podId}">Press for help</button>
+        </article>
+      `
+    )
+    .join("");
+}
+
+async function loadSensors() {
+  const payload = await sensorApi("/status");
+  renderSensors(payload);
+  setSensorNotice();
+  return payload;
+}
+
+if (sensorElements.grid) {
+  sensorElements.grid.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-sensor-action]");
+    if (!button) {
+      return;
+    }
+
+    const action = button.dataset.sensorAction;
+    const podId = button.dataset.podId;
+    const sensor = button.dataset.sensor;
+
+    setBusy(button, true);
+    try {
+      if (action === "spike") {
+        await sensorApi(`/spike/${podId}/${sensor}`, {
+          method: "POST",
+          body: JSON.stringify({ ticks: 6, step: SPIKE_STEP_BY_SENSOR[sensor] || 10 })
+        });
+      } else if (action === "reset") {
+        await sensorApi(`/reset/${podId}/${sensor}`, {
+          method: "POST",
+          body: "{}"
+        });
+      }
+      await loadSensors();
+    } catch (error) {
+      setSensorNotice("error", error.message);
+    } finally {
+      setBusy(button, false);
+    }
+  });
+}
+
+if (sensorElements.buttons) {
+  sensorElements.buttons.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-sensor-action='press']");
+    if (!button) {
+      return;
+    }
+
+    const podId = button.dataset.podId;
+    setBusy(button, true);
+    try {
+      await sensorApi(`/press/${podId}`, {
+        method: "POST",
+        body: JSON.stringify({
+          message: `MT30 button pressed at ${podId}. Immediate assistance requested.`
+        })
+      });
+      setSensorNotice("success", `Button press sent to ${podId}.`);
+    } catch (error) {
+      setSensorNotice("error", error.message);
+    } finally {
+      setBusy(button, false);
+    }
+  });
+}
+
+loadSensors().catch((error) =>
+  setSensorNotice("error", `Sensor simulator not reachable at ${SENSOR_API_BASE} - is the container running? (${error.message})`)
+);
+setInterval(
+  () =>
+    loadSensors().catch((error) =>
+      setSensorNotice("error", `Sensor simulator not reachable at ${SENSOR_API_BASE} - is the container running? (${error.message})`)
+    ),
+  3000
+);

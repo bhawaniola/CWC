@@ -266,12 +266,6 @@ h3 { margin: 0 0 14px; color: #10243d; font-size: 17px; }
 
 .panel { margin-top: 18px; padding: 18px; }
 
-.topology-panel {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.97), rgba(240, 245, 249, 0.92)),
-    radial-gradient(circle at 88% 8%, rgba(29, 111, 242, 0.1), transparent 20rem);
-}
-
 .section-heading {
   display: flex;
   justify-content: space-between;
@@ -286,6 +280,142 @@ h3 { margin: 0 0 14px; color: #10243d; font-size: 17px; }
   color: var(--muted);
   line-height: 1.5;
 }
+
+/* --- Live sensor feed panel -------------------------------------------- */
+
+.sensor-panel {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.97), rgba(240, 245, 249, 0.92)),
+    radial-gradient(circle at 8% 8%, rgba(5, 131, 95, 0.08), transparent 20rem);
+}
+
+.sensor-notice {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(194, 55, 48, 0.25);
+  border-radius: 8px;
+  color: var(--red);
+  background: #fff0ef;
+  font-weight: 700;
+}
+
+.sensor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.sensor-card {
+  position: relative;
+  overflow: hidden;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 14px 34px rgba(25, 45, 74, 0.08);
+  border: 1px solid #dce6ed;
+  border-radius: 8px;
+}
+
+.sensor-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: #8ea1b7;
+}
+
+.sensor-card[data-status="normal"]::before { background: var(--green); }
+.sensor-card[data-status="warning"]::before { background: var(--amber); }
+.sensor-card[data-status="critical"]::before { background: var(--red); }
+
+.sensor-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sensor-card-top strong {
+  display: block;
+  color: #10243d;
+  font-size: 14px;
+}
+
+.sensor-card-top small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sensor-badge {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sensor-card[data-status="normal"] .sensor-badge { color: var(--green); background: #edf8f3; }
+.sensor-card[data-status="warning"] .sensor-badge { color: var(--amber); background: #fdf1e0; }
+.sensor-card[data-status="critical"] .sensor-badge { color: var(--red); background: #fff0ef; }
+
+.sensor-value {
+  margin-bottom: 4px;
+  color: #092347;
+  font-size: 30px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.sensor-value span {
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.sensor-meta {
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.sensor-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sensor-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.button-panel { margin-top: 0; }
+
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.button-card {
+  padding: 12px 14px;
+  border: 1px solid #dbe5ed;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff, #f7fafc);
+}
+
+.button-card strong { display: block; color: #10243d; font-size: 14px; }
+.button-card small { display: block; margin: 3px 0 10px; color: var(--muted); font-size: 12px; }
+.button-card button { width: 100%; min-height: 36px; }
+
+/* ------------------------------------------------------------------------ */
 
 .topology-stats {
   display: grid;
@@ -625,7 +755,7 @@ pre {
     display: grid;
   }
 
-  .link-grid, .topology-grid, .topology-stats, .mesh-edge-list, .pod-connection-map, .pod-connection-row, .hero-metrics { grid-template-columns: 1fr; }
+  .link-grid, .topology-grid, .topology-stats, .mesh-edge-list, .pod-connection-map, .pod-connection-row, .hero-metrics, .sensor-grid, .button-grid { grid-template-columns: 1fr; }
   .section-heading { display: grid; }
   .status-summary { min-width: 0; }
   h1 { font-size: 32px; }

@@ -492,9 +492,31 @@ async function forwardViaRoute(route, request) {
   return response.data;
 }
 
+// Fired hazard alerts now ride the exact same satellite -> cellular -> mesh -> local
+// cache pipeline as SOS requests, instead of only being logged locally. Dropping the
+// alert into localQueue means the existing syncWorker (already running every 5s, plus
+// triggered immediately after submission) will attempt to send it out on its next pass
+// and will keep retrying automatically until a path is available.
 async function sendPodAlert(alert) {
-  console.log(`[connectivity] ${podInfo.podId} stored local hazard alert ${alert.id || alert.hazard}`);
-  return { success: true, localOnly: true };
+  const identity = getPodIdentity();
+  const queuedAlert = {
+    ...alert,
+    id: alert.id || `alert-${Date.now()}`,
+    type: "hazard-alert",
+    podId: alert.podId || identity.podId,
+    podName: alert.podName || identity.podName,
+    region: alert.region || identity.region,
+    syncStatus: "queued-at-origin-pod",
+    queuedAt: new Date().toISOString()
+  };
+
+  localQueue.enqueue(queuedAlert);
+
+  console.log(
+    `[connectivity] ${podInfo.podId} queued hazard alert ${queuedAlert.id} (${queuedAlert.hazard || "unknown hazard"}) for satellite/cellular/mesh sync`
+  );
+
+  return { success: true, queued: true, id: queuedAlert.id };
 }
 
 async function sendSecurityEvent(event) {
