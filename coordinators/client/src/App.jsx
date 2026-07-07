@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FiActivity,
   FiAlertTriangle,
+  FiBriefcase,
   FiCheckCircle,
+  FiClock,
   FiCloud,
   FiDatabase,
   FiDroplet,
@@ -10,11 +12,15 @@ import {
   FiHeart,
   FiHome,
   FiLifeBuoy,
+  FiMap,
+  FiMapPin,
   FiRadio,
   FiRefreshCw,
+  FiSend,
   FiShield,
   FiTool,
   FiTruck,
+  FiUserCheck,
   FiUsers,
   FiWifi
 } from "react-icons/fi";
@@ -26,6 +32,7 @@ import {
   updateCoordinatorTask,
   updateNetworkPath
 } from "./api";
+import sanjeevaniLogo from "./assets/sanjeevani-logo.png";
 
 const roleIcons = {
   hospital: FiHeart,
@@ -36,6 +43,99 @@ const roleIcons = {
 };
 
 const statusOptions = ["pending", "active", "assigned", "monitoring", "done"];
+
+const ambulanceSeed = [
+  {
+    id: "AMB-104",
+    type: "ALS",
+    crew: "Dr. Meera + Kiran",
+    location: "District Hospital",
+    status: "ready",
+    oxygen: 92
+  },
+  {
+    id: "AMB-117",
+    type: "BLS",
+    crew: "Rafiq + Neha",
+    location: "North Gate triage",
+    status: "ready",
+    oxygen: 76
+  },
+  {
+    id: "AMB-122",
+    type: "ICU",
+    crew: "Ananya + Suresh",
+    location: "Mobile ICU bay",
+    status: "ready",
+    oxygen: 88
+  },
+  {
+    id: "AMB-136",
+    type: "BLS",
+    crew: "Standby crew",
+    location: "Fuel and supply line",
+    status: "maintenance",
+    oxygen: 40
+  }
+];
+
+const workforceSeed = [
+  {
+    id: "WF-021",
+    name: "Asha Nair",
+    skill: "Medic",
+    zone: "North shelter",
+    status: "available"
+  },
+  {
+    id: "WF-034",
+    name: "Rohan Das",
+    skill: "Logistics",
+    zone: "Supply yard",
+    status: "available"
+  },
+  {
+    id: "WF-047",
+    name: "Mehul Shah",
+    skill: "Driver",
+    zone: "Ambulance bay",
+    status: "available"
+  },
+  {
+    id: "WF-052",
+    name: "Farah Khan",
+    skill: "Registration",
+    zone: "Shelter desk",
+    status: "available"
+  },
+  {
+    id: "WF-063",
+    name: "Tenzin Dorji",
+    skill: "Rescue support",
+    zone: "Bridge point",
+    status: "available"
+  },
+  {
+    id: "WF-078",
+    name: "Kavya Rao",
+    skill: "Food line",
+    zone: "Community kitchen",
+    status: "assigned",
+    assignedTo: "Main school shelter"
+  }
+];
+
+const shelterTargets = [
+  { id: "shelter-school", label: "Main school shelter", capacity: 420, load: 276 },
+  { id: "shelter-temple", label: "Temple relief hall", capacity: 220, load: 154 },
+  { id: "shelter-stadium", label: "Indoor stadium camp", capacity: 700, load: 398 }
+];
+
+const stagingPoints = [
+  { id: "staging-north", label: "North bridge point" },
+  { id: "staging-market", label: "Old market road" },
+  { id: "staging-hospital", label: "Hospital gate 2" }
+];
 
 function classNames(...items) {
   return items.filter(Boolean).join(" ");
@@ -58,6 +158,35 @@ function formatTime(value) {
 
 function fieldById(fields, fieldId) {
   return fields.find((field) => field.id === fieldId)?.value ?? 0;
+}
+
+function normalizeOperationEvent(item, fallbackLocation, type = "inbox") {
+  const route = item.deliveryRoute || item.raw?.deliveryRoute || {};
+  const routing = item.raw?.routing || {};
+  const target = routing.targetCoordinator || {};
+  const matchedDepartments =
+    item.matchedDepartments ||
+    routing.classification?.departments?.map((department) => department.label || department.role).filter(Boolean) ||
+    item.raw?.requestTypes ||
+    [];
+
+  return {
+    id: item.id,
+    title: item.title || "Coordinator request",
+    message: item.message || item.detail || item.status || "Awaiting coordinator action.",
+    location: item.location || fallbackLocation || "Regional command zone",
+    severity: item.severity || "medium",
+    source: item.source || (type === "incident" ? "incident desk" : "coordinator"),
+    transport: item.transport || (type === "incident" ? "local" : "mesh"),
+    targetCoordinatorName: item.targetCoordinatorName || target.name || "",
+    targetRole: item.targetRole || target.role || "",
+    deliveryRoute: route,
+    deliveryId: item.deliveryId || routing.deliveryId || "",
+    routingSummary: item.routingSummary || routing.classification?.summary || "",
+    matchedDepartments,
+    receivedAt: item.receivedAt || item.updatedAt,
+    type
+  };
 }
 
 function DashboardSpecialist({ data }) {
@@ -298,20 +427,36 @@ function NetworkCard({ data, onTogglePath, busyPath }) {
   );
 }
 
-function FeedItem({ item }) {
+function FeedItem({ item, selected, onSelect }) {
   return (
-    <article className={classNames("feed-item", item.severity)}>
+    <button
+      className={classNames("feed-item", item.severity, selected && "selected")}
+      type="button"
+      onClick={() => onSelect(item)}
+    >
       <div className="feed-topline">
         <strong>{item.title}</strong>
         <span>{item.severity}</span>
       </div>
       <p>{item.message}</p>
+      {(item.targetCoordinatorName || item.routingSummary || item.matchedDepartments?.length) ? (
+        <div className="feed-route-meta">
+          {item.targetCoordinatorName ? <span>Target: {item.targetCoordinatorName}</span> : null}
+          {item.deliveryRoute?.transport ? (
+            <span>
+              Route: {item.deliveryRoute.transport}
+              {item.deliveryRoute.linkName ? ` / ${item.deliveryRoute.linkName}` : ""}
+            </span>
+          ) : null}
+          {item.matchedDepartments?.length ? <span>Type: {item.matchedDepartments.join(", ")}</span> : null}
+        </div>
+      ) : null}
       <footer>
         <span>{item.location}</span>
         <span>{item.source} via {item.transport}</span>
         <span>{formatTime(item.receivedAt)}</span>
       </footer>
-    </article>
+    </button>
   );
 }
 
@@ -348,7 +493,7 @@ function TaskList({ tasks, onTaskChange }) {
   );
 }
 
-function IncidentList({ incidents }) {
+function IncidentList({ incidents, selectedEventId, onSelectIncident }) {
   return (
     <section className="panel">
       <div className="panel-heading compact">
@@ -362,13 +507,262 @@ function IncidentList({ incidents }) {
       </div>
       <div className="incident-list">
         {incidents.map((incident) => (
-          <article className={classNames("incident-row", incident.severity)} key={incident.id}>
+          <button
+            className={classNames("incident-row", incident.severity, selectedEventId === incident.id && "selected")}
+            key={incident.id}
+            type="button"
+            onClick={() => onSelectIncident(incident)}
+          >
             <span>{incident.id}</span>
             <strong>{incident.title}</strong>
             <em>{incident.status}</em>
-          </article>
+          </button>
         ))}
       </div>
+    </section>
+  );
+}
+
+function OperationsBoard({
+  ambulanceRoster,
+  events,
+  operationLog,
+  selectedAmbulanceId,
+  selectedEvent,
+  selectedEventId,
+  selectedShelterId,
+  selectedStagingPointId,
+  selectedWorkerIds,
+  workerRoster,
+  onAssignWorkers,
+  onDispatchAmbulance,
+  onSelectAmbulance,
+  onSelectEvent,
+  onSelectShelter,
+  onSelectStagingPoint,
+  onToggleWorker
+}) {
+  const availableAmbulances = ambulanceRoster.filter((ambulance) => ambulance.status === "ready").length;
+  const availableWorkers = workerRoster.filter((worker) => worker.status === "available").length;
+  const activeTarget =
+    selectedEvent ||
+    events[0] || {
+      id: "regional-standby",
+      title: "Regional standby",
+      message: "No active requests in the current queue.",
+      location: "Command zone",
+      severity: "info",
+      source: "coordinator",
+      transport: "local",
+      receivedAt: new Date().toISOString()
+    };
+  const selectedShelter = shelterTargets.find((target) => target.id === selectedShelterId) || shelterTargets[0];
+  const selectedPoint =
+    stagingPoints.find((point) => point.id === selectedStagingPointId) || stagingPoints[0];
+
+  return (
+    <section className="operations-grid" aria-label="Coordinator operations">
+      <section className="panel dispatch-panel">
+        <div className="panel-heading">
+          <span className="section-icon" aria-hidden="true">
+            <FiMapPin />
+          </span>
+          <div>
+            <p>Event Assignment</p>
+            <h2>Active dispatch target</h2>
+          </div>
+        </div>
+
+        <div className={classNames("target-card", activeTarget.severity)}>
+          <div>
+            <span>{activeTarget.severity}</span>
+            <h3>{activeTarget.title}</h3>
+            <p>{activeTarget.message}</p>
+          </div>
+          <strong>
+            <FiMapPin aria-hidden="true" />
+            {activeTarget.location}
+          </strong>
+        </div>
+
+        <div className="target-list">
+          {events.slice(0, 4).map((event) => (
+            <button
+              className={classNames("target-option", selectedEventId === event.id && "selected")}
+              key={`${event.type}-${event.id}`}
+              type="button"
+              onClick={() => onSelectEvent(event)}
+            >
+              <span className={classNames("severity-dot", event.severity)} />
+              <strong>{event.title}</strong>
+              <small>{event.location}</small>
+            </button>
+          ))}
+        </div>
+
+        <div className="resource-stat-row">
+          <span>
+            <strong>{availableAmbulances}</strong>
+            <small>Ambulances ready</small>
+          </span>
+          <span>
+            <strong>{availableWorkers}</strong>
+            <small>Workers free</small>
+          </span>
+          <span>
+            <strong>{selectedWorkerIds.length}</strong>
+            <small>Workers selected</small>
+          </span>
+        </div>
+      </section>
+
+      <section className="panel ambulance-panel">
+        <div className="panel-heading compact">
+          <span className="section-icon" aria-hidden="true">
+            <FiTruck />
+          </span>
+          <div>
+            <p>Ambulance Control</p>
+            <h2>Numbered fleet</h2>
+          </div>
+        </div>
+
+        <div className="ambulance-list">
+          {ambulanceRoster.map((ambulance) => (
+            <button
+              className={classNames(
+                "ambulance-option",
+                ambulance.status,
+                selectedAmbulanceId === ambulance.id && "selected"
+              )}
+              disabled={ambulance.status !== "ready"}
+              key={ambulance.id}
+              type="button"
+              onClick={() => onSelectAmbulance(ambulance.id)}
+            >
+              <span>
+                <strong>{ambulance.id}</strong>
+                <em>{ambulance.type}</em>
+              </span>
+              <small>{ambulance.crew}</small>
+              <footer>
+                <span>{ambulance.location}</span>
+                <span>{ambulance.oxygen}% O2</span>
+              </footer>
+            </button>
+          ))}
+        </div>
+
+        <button
+          className="primary-action danger-action"
+          disabled={!selectedAmbulanceId || activeTarget.id === "regional-standby"}
+          type="button"
+          onClick={onDispatchAmbulance}
+        >
+          <FiSend aria-hidden="true" />
+          Dispatch ambulance
+        </button>
+      </section>
+
+      <section className="panel workforce-panel">
+        <div className="panel-heading compact">
+          <span className="section-icon" aria-hidden="true">
+            <FiUserCheck />
+          </span>
+          <div>
+            <p>Workforce Control</p>
+            <h2>Shelter assignment</h2>
+          </div>
+        </div>
+
+        <div className="assignment-controls">
+          <label>
+            <span>Shelter</span>
+            <select value={selectedShelterId} onChange={(event) => onSelectShelter(event.target.value)}>
+              {shelterTargets.map((target) => (
+                <option key={target.id} value={target.id}>
+                  {target.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Send via</span>
+            <select value={selectedStagingPointId} onChange={(event) => onSelectStagingPoint(event.target.value)}>
+              {stagingPoints.map((point) => (
+                <option key={point.id} value={point.id}>
+                  {point.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="worker-list">
+          {workerRoster.map((worker) => (
+            <button
+              className={classNames(
+                "worker-option",
+                worker.status,
+                selectedWorkerIds.includes(worker.id) && "selected"
+              )}
+              disabled={worker.status !== "available"}
+              key={worker.id}
+              type="button"
+              onClick={() => onToggleWorker(worker.id)}
+            >
+              <span>
+                <strong>{worker.name}</strong>
+                <em>{worker.id}</em>
+              </span>
+              <small>{worker.skill}</small>
+              <footer>
+                <span>{worker.assignedTo || worker.zone}</span>
+                <span>{worker.status}</span>
+              </footer>
+            </button>
+          ))}
+        </div>
+
+        <button
+          className="primary-action"
+          disabled={selectedWorkerIds.length === 0}
+          type="button"
+          onClick={onAssignWorkers}
+        >
+          <FiBriefcase aria-hidden="true" />
+          Assign to {selectedShelter.label}
+        </button>
+
+        <div className="destination-chip">
+          <FiMap aria-hidden="true" />
+          <span>{selectedPoint.label}</span>
+        </div>
+      </section>
+
+      <section className="panel operations-log-panel">
+        <div className="panel-heading compact">
+          <span className="section-icon" aria-hidden="true">
+            <FiClock />
+          </span>
+          <div>
+            <p>Movement Log</p>
+            <h2>Recent actions</h2>
+          </div>
+        </div>
+
+        <div className="operation-log">
+          {operationLog.map((entry) => (
+            <article className={classNames("log-row", entry.tone)} key={entry.id}>
+              <span>{formatTime(entry.time)}</span>
+              <div>
+                <strong>{entry.title}</strong>
+                <small>{entry.detail}</small>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
     </section>
   );
 }
@@ -379,6 +773,22 @@ export default function App() {
   const [pendingFields, setPendingFields] = useState({});
   const [busyPath, setBusyPath] = useState("");
   const [syncMessage, setSyncMessage] = useState("Live coordinator channel ready.");
+  const [ambulances, setAmbulances] = useState(ambulanceSeed);
+  const [workers, setWorkers] = useState(workforceSeed);
+  const [selectedEventId, setSelectedEventId] = useState("");
+  const [selectedAmbulanceId, setSelectedAmbulanceId] = useState("AMB-104");
+  const [selectedWorkerIds, setSelectedWorkerIds] = useState([]);
+  const [selectedShelterId, setSelectedShelterId] = useState(shelterTargets[0].id);
+  const [selectedStagingPointId, setSelectedStagingPointId] = useState(stagingPoints[0].id);
+  const [operationLog, setOperationLog] = useState([
+    {
+      id: "log-standby",
+      time: new Date().toISOString(),
+      title: "Resource desk online",
+      detail: "Ambulance and worker rosters loaded for coordinator actions.",
+      tone: "info"
+    }
+  ]);
 
   const refresh = useCallback(async (signal) => {
     try {
@@ -402,6 +812,30 @@ export default function App() {
       window.clearInterval(interval);
     };
   }, [refresh]);
+
+  const operationEvents = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+
+    const region = data.identity?.region || "Regional command zone";
+    const inboxEvents = (data.inbox || []).map((item) => normalizeOperationEvent(item, region));
+    const incidentEvents = (data.incidents || []).map((incident) =>
+      normalizeOperationEvent(incident, region, "incident")
+    );
+
+    return [...inboxEvents, ...incidentEvents];
+  }, [data]);
+
+  const selectedEvent = useMemo(() => {
+    return operationEvents.find((event) => event.id === selectedEventId) || operationEvents[0] || null;
+  }, [operationEvents, selectedEventId]);
+
+  useEffect(() => {
+    if (operationEvents.length && !operationEvents.some((event) => event.id === selectedEventId)) {
+      setSelectedEventId(operationEvents[0].id);
+    }
+  }, [operationEvents, selectedEventId]);
 
   async function handleFieldChange(fieldId, value) {
     setPendingFields((current) => ({ ...current, [fieldId]: true }));
@@ -461,6 +895,135 @@ export default function App() {
     }
   }
 
+  function appendOperationLog(entry) {
+    setOperationLog((current) =>
+      [
+        {
+          id: `log-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          time: new Date().toISOString(),
+          tone: "info",
+          ...entry
+        },
+        ...current
+      ].slice(0, 7)
+    );
+  }
+
+  async function adjustCoordinatorField(fieldIds, delta) {
+    if (!data) {
+      return;
+    }
+
+    const field = data.fields.find((item) => fieldIds.includes(item.id));
+    if (!field) {
+      return;
+    }
+
+    const currentValue = Number(field.value);
+    if (!Number.isFinite(currentValue)) {
+      return;
+    }
+
+    const min = Number.isFinite(Number(field.min)) ? Number(field.min) : 0;
+    const max = Number.isFinite(Number(field.max)) ? Number(field.max) : Number.MAX_SAFE_INTEGER;
+    const nextValue = Math.min(max, Math.max(min, currentValue + delta));
+
+    if (nextValue !== currentValue) {
+      await handleFieldChange(field.id, nextValue);
+    }
+  }
+
+  async function handleDispatchAmbulance() {
+    const target = selectedEvent;
+    const ambulance = ambulances.find((item) => item.id === selectedAmbulanceId);
+
+    if (!target || !ambulance || ambulance.status !== "ready") {
+      setSyncMessage("Select a ready ambulance and active target.");
+      return;
+    }
+
+    setAmbulances((current) =>
+      current.map((item) =>
+        item.id === ambulance.id
+          ? {
+              ...item,
+              status: "dispatched",
+              location: target.location,
+              assignedTo: target.title
+            }
+          : item
+      )
+    );
+
+    const nextReady = ambulances.find((item) => item.id !== ambulance.id && item.status === "ready");
+    setSelectedAmbulanceId(nextReady?.id || "");
+    appendOperationLog({
+      title: `${ambulance.id} dispatched`,
+      detail: `${target.title} | ${target.location}`,
+      tone: target.severity === "critical" || target.severity === "high" ? "urgent" : "info"
+    });
+    setSyncMessage(`${ambulance.id} assigned to ${target.location}. Ambulance availability reduced.`);
+    await adjustCoordinatorField(["ambulancesReady"], -1);
+  }
+
+  function handleToggleWorker(workerId) {
+    const worker = workers.find((item) => item.id === workerId);
+    if (!worker || worker.status !== "available") {
+      return;
+    }
+
+    setSelectedWorkerIds((current) =>
+      current.includes(workerId) ? current.filter((id) => id !== workerId) : [...current, workerId]
+    );
+  }
+
+  async function handleAssignWorkers() {
+    const selectedShelter =
+      shelterTargets.find((target) => target.id === selectedShelterId) || shelterTargets[0];
+    const selectedPoint =
+      stagingPoints.find((point) => point.id === selectedStagingPointId) || stagingPoints[0];
+    const pickedWorkers = workers.filter(
+      (worker) => selectedWorkerIds.includes(worker.id) && worker.status === "available"
+    );
+
+    if (!pickedWorkers.length) {
+      setSyncMessage("Select available workers before assigning shelter support.");
+      return;
+    }
+
+    setWorkers((current) =>
+      current.map((worker) =>
+        selectedWorkerIds.includes(worker.id) && worker.status === "available"
+          ? {
+              ...worker,
+              status: "assigned",
+              assignedTo: selectedShelter.label,
+              destination: selectedPoint.label
+            }
+          : worker
+      )
+    );
+    setSelectedWorkerIds([]);
+    appendOperationLog({
+      title: `${pickedWorkers.length} worker(s) assigned`,
+      detail: `${selectedShelter.label} via ${selectedPoint.label}`,
+      tone: "success"
+    });
+    setSyncMessage(`${pickedWorkers.length} worker(s) sent to ${selectedShelter.label}.`);
+    await adjustCoordinatorField(["volunteersAvailable"], -pickedWorkers.length);
+    await adjustCoordinatorField(["pendingAssignments"], -pickedWorkers.length);
+  }
+
+  function handleSelectEvent(event) {
+    setSelectedEventId(event.id);
+    setSyncMessage(`${event.title} selected for resource assignment.`);
+  }
+
+  function handleSelectIncident(incident) {
+    const region = data?.identity?.region || "Regional command zone";
+    handleSelectEvent(normalizeOperationEvent(incident, region, "incident"));
+  }
+
   const RoleIcon = useMemo(() => {
     return roleIcons[data?.role?.id] || FiActivity;
   }, [data?.role?.id]);
@@ -478,6 +1041,9 @@ export default function App() {
     <main className={classNames("app-shell", `accent-${data.role.accent}`)}>
       <header className="command-header">
         <div className="identity-lockup">
+          <span className="logo-mark">
+            <img src={sanjeevaniLogo} alt="SANJEEVANI" />
+          </span>
           <span className="role-mark" aria-hidden="true">
             <RoleIcon />
           </span>
@@ -488,6 +1054,16 @@ export default function App() {
           </div>
         </div>
         <div className="header-actions">
+          <div className="command-kpis">
+            <span>
+              <FiDatabase aria-hidden="true" />
+              Queue {data.syncQueueCount || 0}
+            </span>
+            <span>
+              <FiMapPin aria-hidden="true" />
+              {(data.coverageNodes || []).length || 1} zones
+            </span>
+          </div>
           <div className="sync-pill">
             <FiCloud aria-hidden="true" />
             <span>{syncMessage}</span>
@@ -499,6 +1075,26 @@ export default function App() {
       </header>
 
       <DashboardSpecialist data={data} />
+
+      <OperationsBoard
+        ambulanceRoster={ambulances}
+        events={operationEvents}
+        operationLog={operationLog}
+        selectedAmbulanceId={selectedAmbulanceId}
+        selectedEvent={selectedEvent}
+        selectedEventId={selectedEventId}
+        selectedShelterId={selectedShelterId}
+        selectedStagingPointId={selectedStagingPointId}
+        selectedWorkerIds={selectedWorkerIds}
+        workerRoster={workers}
+        onAssignWorkers={handleAssignWorkers}
+        onDispatchAmbulance={handleDispatchAmbulance}
+        onSelectAmbulance={setSelectedAmbulanceId}
+        onSelectEvent={handleSelectEvent}
+        onSelectShelter={setSelectedShelterId}
+        onSelectStagingPoint={setSelectedStagingPointId}
+        onToggleWorker={handleToggleWorker}
+      />
 
       <section className="main-grid">
         <section className="panel metrics-panel">
@@ -539,7 +1135,14 @@ export default function App() {
           </div>
           <div className="feed-list">
             {data.inbox.length ? (
-              data.inbox.map((item) => <FeedItem item={item} key={item.id} />)
+              data.inbox.map((item) => (
+                <FeedItem
+                  item={item}
+                  key={item.id}
+                  selected={selectedEventId === item.id}
+                  onSelect={handleSelectEvent}
+                />
+              ))
             ) : (
               <div className="empty-state">
                 <FiWifi aria-hidden="true" />
@@ -552,7 +1155,11 @@ export default function App() {
 
         <div className="right-stack">
           <TaskList tasks={data.tasks} onTaskChange={handleTaskChange} />
-          <IncidentList incidents={data.incidents} />
+          <IncidentList
+            incidents={data.incidents}
+            selectedEventId={selectedEventId}
+            onSelectIncident={handleSelectIncident}
+          />
         </div>
       </section>
 

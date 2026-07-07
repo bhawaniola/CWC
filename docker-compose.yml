@@ -1,11 +1,27 @@
 services:
+  mongodb:
+    image: mongo:7
+    container_name: sanjeevani-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - sanjeevani-net
+
   cloud-api:
-    build: ./cloud-api
+    build: ./Command-Center/Backend
     container_name: sanjeevani-cloud-api
+    depends_on:
+      - mongodb
     ports:
       - "9000:9000"
     environment:
+      MONGODB_URI: mongodb://mongodb:27017/sanjeevani-command-center
       POD_URLS: "POD-01=http://pod-01:8000,POD-02=http://pod-02:8000,POD-03=http://pod-03:8000,POD-04=http://pod-04:8000,POD-05=http://pod-05:8000,POD-06=http://pod-06:8000,POD-07=http://pod-07:8000,POD-08=http://pod-08:8000,POD-09=http://pod-09:8000,POD-10=http://pod-10:8000"
+      SATELLITE_URL: http://satellite:9100
+      CELL_TOWER_URLS: "CELLTOWER-1=http://celltower-1:9201,CELLTOWER-2=http://celltower-2:9202"
+      COORDINATOR_URLS: "FIRE-01|FireDept|fire|http://fire-coordinator:8000|CELLTOWER-1;HOSPITAL-01|Hospital1|hospital|http://hospital-1-coordinator:8000|CELLTOWER-1;HOSPITAL-02|Hospital2|hospital|http://hospital-2-coordinator:8000|;SHELTER-A|ShelterCampA|shelter|http://shelter-a-coordinator:8000|;SHELTER-B|ShelterCampB|shelter|http://shelter-b-coordinator:8000|CELLTOWER-1;SHELTER-C|ShelterCamp2|shelter|http://shelter-c-coordinator:8000|CELLTOWER-2;WORKFORCE-01|WorkForceCamp1|workforce|http://workforce-1-coordinator:8000|CELLTOWER-2;WORKFORCE-02|WorkForceCamp2|workforce|http://workforce-2-coordinator:8000|CELLTOWER-2;FLOOD-01|FloodRescueDept|flood|http://flood-coordinator-1:8000|"
     networks:
       - sanjeevani-net
 
@@ -77,7 +93,7 @@ services:
       - sanjeevani-net
 
   command-center:
-    build: ./command-center
+    build: ./Command-Center/Frontend
     container_name: sanjeevani-command-center
     depends_on:
       - cloud-api
@@ -87,6 +103,7 @@ services:
     environment:
       PORT: 9400
       CLOUD_URL: http://cloud-api:9000
+      CLOUD_SOCKET_URL: http://cloud-api:9000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
       POD_URLS: "POD-01=http://pod-01:8000,POD-02=http://pod-02:8000,POD-03=http://pod-03:8000,POD-04=http://pod-04:8000,POD-05=http://pod-05:8000,POD-06=http://pod-06:8000,POD-07=http://pod-07:8000,POD-08=http://pod-08:8000,POD-09=http://pod-09:8000,POD-10=http://pod-10:8000"
     networks:
@@ -318,8 +335,8 @@ services:
       COORDINATOR_REGION: Medical North Range
       COVERAGE_NODES: POD-02,POD-06
       SATELLITE_URL: http://satellite:9100
-      CELL_TOWERS: ""
-      CONNECTED_TOWERS: ""
+      CELL_TOWERS: CELLTOWER-1=http://celltower-1:9201
+      CONNECTED_TOWERS: CELLTOWER-1
       NEIGHBORS: http://pod-02:8000,http://pod-06:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
@@ -450,8 +467,8 @@ services:
       COORDINATOR_REGION: Workforce High Ground Range
       COVERAGE_NODES: POD-09
       SATELLITE_URL: http://satellite:9100
-      CELL_TOWERS: ""
-      CONNECTED_TOWERS: ""
+      CELL_TOWERS: CELLTOWER-2=http://celltower-2:9202
+      CONNECTED_TOWERS: CELLTOWER-2
       NEIGHBORS: http://pod-09:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
@@ -506,3 +523,6 @@ services:
 networks:
   sanjeevani-net:
     name: sanjeevani-net
+
+volumes:
+  mongo-data:

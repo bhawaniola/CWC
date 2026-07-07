@@ -402,6 +402,16 @@ h3 { margin: 0 0 14px; color: #10243d; font-size: 17px; }
   font-weight: 900;
 }
 
+.coordinator-chip-list {
+  margin-top: 9px;
+}
+
+.pod-chip.coordinator {
+  border-color: #bde3d9;
+  color: #08715f;
+  background: #eefbf7;
+}
+
 .mesh-edge-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

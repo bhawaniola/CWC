@@ -101,19 +101,22 @@ const towerTopology = [
     key: "celltower-1",
     label: "CELLTOWER-1",
     description: "Primary west and central coverage",
-    pods: podTopology.filter((pod) => pod.towers.includes("CELLTOWER-1")).map((pod) => pod.id)
+    pods: podTopology.filter((pod) => pod.towers.includes("CELLTOWER-1")).map((pod) => pod.id),
+    coordinators: ["FireDept", "Hospital1", "ShelterCampB"]
   },
   {
     key: "celltower-2",
     label: "CELLTOWER-2",
     description: "Primary east and relay-side coverage",
-    pods: podTopology.filter((pod) => pod.towers.includes("CELLTOWER-2")).map((pod) => pod.id)
+    pods: podTopology.filter((pod) => pod.towers.includes("CELLTOWER-2")).map((pod) => pod.id),
+    coordinators: ["WorkForceCamp1", "WorkForceCamp2", "ShelterCamp2"]
   },
   {
     key: "mesh-only",
     label: "No direct cell tower",
     description: "Uses satellite or neighbor pod mesh",
-    pods: podTopology.filter((pod) => pod.towers.length === 0).map((pod) => pod.id)
+    pods: podTopology.filter((pod) => pod.towers.length === 0).map((pod) => pod.id),
+    coordinators: []
   }
 ];
 
@@ -211,6 +214,13 @@ function renderTopology() {
               )
               .join("")}
           </div>
+          ${
+            tower.coordinators.length
+              ? `<div class="pod-chip-list coordinator-chip-list">
+                  ${tower.coordinators.map((name) => `<span class="pod-chip coordinator">${name}</span>`).join("")}
+                </div>`
+              : ""
+          }
         </div>
       `
     )

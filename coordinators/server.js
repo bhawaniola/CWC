@@ -133,16 +133,16 @@ const ROLE_TEMPLATES = {
     roleLabel: "Fire Coordinator",
     dashboard: "fire",
     accent: "red",
-    matchCategories: ["fire", "rescue"],
+    matchCategories: ["fire"],
     matchKeywords: [
       "burn",
-      "evacuation",
+      "electrical fire",
+      "explosion",
       "fire",
       "flame",
       "hotspot",
       "smoke",
       "sprinkler",
-      "trapped",
       "wildfire"
     ],
     fields: [
@@ -266,7 +266,21 @@ function writeJson(filePath, value) {
   ensureDataDir();
   const tmpPath = `${filePath}.tmp`;
   fs.writeFileSync(tmpPath, JSON.stringify(value, null, 2));
-  fs.renameSync(tmpPath, filePath);
+
+  try {
+    fs.renameSync(tmpPath, filePath);
+  } catch (error) {
+    if (!["EACCES", "EPERM"].includes(error.code)) {
+      throw error;
+    }
+
+    fs.copyFileSync(tmpPath, filePath);
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch (unlinkError) {
+      // Best-effort cleanup. Some Windows workspaces deny unlinking immediately after copy.
+    }
+  }
 }
 
 function readJson(filePath, fallback) {
@@ -669,6 +683,32 @@ function textForMatching(payload) {
     .toLowerCase();
 }
 
+function routedTargets(payload) {
+  const targets = [];
+  if (Array.isArray(payload.routing?.targets)) {
+    targets.push(...payload.routing.targets);
+  }
+
+  if (payload.routing?.targetCoordinator) {
+    targets.push(payload.routing.targetCoordinator);
+  }
+
+  return targets
+    .map((target) => ({
+      id: String(target.id || target.targetCoordinatorId || target.coordinatorId || "").toLowerCase(),
+      role: String(target.role || target.targetRole || "").toLowerCase()
+    }))
+    .filter((target) => target.id || target.role);
+}
+
+function targetMatchesIdentity(target) {
+  if (target.id) {
+    return target.id === identity.coordinatorId.toLowerCase();
+  }
+
+  return target.role === identity.role;
+}
+
 function matchesCoordinatorRole(payload) {
   if (!payload || typeof payload !== "object") {
     return false;
@@ -680,6 +720,11 @@ function matchesCoordinatorRole(payload) {
 
   if (String(payload.targetRole || "").toLowerCase() === identity.role) {
     return true;
+  }
+
+  const explicitTargets = routedTargets(payload);
+  if (explicitTargets.length) {
+    return explicitTargets.some(targetMatchesIdentity);
   }
 
   const category = String(payload.category || payload.type || payload.hazard || "").toLowerCase();
@@ -728,6 +773,15 @@ function storeIncoming(payload, meta = {}) {
 
   const state = getState();
   const receivedAt = new Date().toISOString();
+  const routing = payload.routing || {};
+  const route = payload.deliveryRoute || {};
+  const classification = routing.classification || {};
+  const targetCoordinator = routing.targetCoordinator || {};
+  const departmentLabels = Array.isArray(classification.departments)
+    ? classification.departments.map((department) => department.label || department.role).filter(Boolean)
+    : Array.isArray(payload.requestTypes)
+      ? payload.requestTypes
+      : [];
   const item = {
     id: payload.id || `incoming-${crypto.randomUUID()}`,
     title:
@@ -743,11 +797,26 @@ function storeIncoming(payload, meta = {}) {
     transport: meta.transport || payload.transport || payload.linkType || payload.network?.syncPath || "pod-mesh",
     sourcePodId: payload.podId || payload.sourcePodId || "",
     requester: payload.name || payload.requester || "",
+    deliveryId: routing.deliveryId || payload.deliveryId || "",
+    targetCoordinatorName: targetCoordinator.name || payload.targetCoordinatorName || identity.coordinatorName,
+    targetRole: targetCoordinator.role || payload.targetRole || roleTemplate.dashboard,
+    deliveryRoute: {
+      transport: route.transport || meta.transport || payload.transport || "",
+      linkName: route.linkName || payload.linkName || "",
+      trigger: route.trigger || payload.trigger || "",
+      sentAt: route.sentAt || payload.sentAt || ""
+    },
+    matchedDepartments: departmentLabels,
+    routingSummary: classification.summary || departmentLabels.join(", ") || "",
     receivedAt,
     raw: payload
   };
 
   const existingItem = state.inbox.find((existing) => existing.id === item.id);
+  const existingSeenVia = Array.isArray(existingItem?.seenVia)
+    ? existingItem.seenVia
+    : [existingItem?.transport].filter(Boolean);
+  const shouldLogReceipt = !existingItem || !existingSeenVia.includes(item.transport);
   const mergedItem = existingItem
     ? {
         ...existingItem,
@@ -769,6 +838,16 @@ function storeIncoming(payload, meta = {}) {
         ...item,
         seenVia: [item.transport].filter(Boolean)
       };
+
+  if (shouldLogReceipt) {
+    console.log(
+      `[coordinator][inbox][${identity.coordinatorId}][${item.id}] received ${item.category} request from ${
+        item.sourcePodId || item.source || "cloud"
+      } via ${item.transport}; target=${item.targetCoordinatorName}; route=${
+        item.deliveryRoute.transport || item.transport
+      }${item.deliveryRoute.linkName ? `/${item.deliveryRoute.linkName}` : ""}; title="${item.title}"`
+    );
+  }
 
   const inbox = state.inbox.filter((existing) => existing.id !== item.id);
   state.inbox = [mergedItem, ...inbox].slice(0, 80);
@@ -1180,6 +1259,9 @@ function acceptCoordinatorInbox(req, res) {
   });
 
   if (!result.accepted) {
+    console.log(
+      `[coordinator][inbox][${identity.coordinatorId}] ignored ${payload.id || "unknown-request"}: ${result.reason}`
+    );
     return res.status(202).json({
       success: true,
       accepted: false,

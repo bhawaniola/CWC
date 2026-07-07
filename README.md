@@ -9,7 +9,9 @@ Pods do not post directly to the cloud. A pod must forward through the satellite
 ```text
 .
 |-- docker-compose.yml
-|-- cloud-api/                 # central cloud receiver on port 9000
+|-- Command-Center/            # EOC frontend + cloud backend module
+|   |-- Frontend/              # command-center UI/proxy on port 9400
+|   `-- Backend/               # cloud API on port 9000 with MongoDB + sockets
 |-- link-node/                 # shared satellite and celltower service image
 |-- simulation-controller/     # global Docker stop/start controller on port 9300
 |-- pod-agent/                 # shared pod backend and React/Vite citizen SOS UI
@@ -48,7 +50,8 @@ Simulation controller API: http://localhost:9300/api/infra/status
 
 ```text
 command-center         EOC dashboard aggregating the whole network (port 9400)
-cloud-api              stores SOS requests received through link-nodes
+cloud-api              backend API storing SOS requests in MongoDB (port 9000)
+mongodb                persistent database for the cloud API
 satellite              satellite middleman forwarding to cloud-api
 celltower-1            cellular middleman forwarding to cloud-api
 celltower-2            cellular middleman forwarding to cloud-api
@@ -60,8 +63,10 @@ pod-01..pod-10         local pod SOS app, routing engine, queue, and mesh relay
 
 A single operator dashboard built to match the design mockups in `images/`.
 It is a plain HTML/CSS/vanilla-JS app (no build step) served by a small Node
-aggregator that fans out to the cloud-api, the simulation-controller, and all
-ten pods, then refreshes every 5 seconds. Five hash-linked pages:
+frontend aggregator in `Command-Center/Frontend`. The cloud backend lives beside
+it in `Command-Center/Backend`, persists cloud state to the `mongodb` container,
+and pushes realtime socket events to the frontend. The UI still keeps a 5-second
+polling fallback. Five hash-linked pages:
 
 - **Dashboard** — KPI cards (active/critical requests, pods online, current
   mode), live emergency requests, pod network status, early-warning + activity

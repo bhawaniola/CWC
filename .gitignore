@@ -5,3 +5,4 @@ node_modules/
 dist/
 pod-data/
 coordinator-data/
+coordinators/data/

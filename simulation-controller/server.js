@@ -29,6 +29,19 @@ const links = {
   }
 };
 
+const towerCoordinatorCoverage = {
+  "CELLTOWER-1": [
+    { id: "FIRE-01", name: "FireDept", role: "fire" },
+    { id: "HOSPITAL-01", name: "Hospital1", role: "hospital" },
+    { id: "SHELTER-B", name: "ShelterCampB", role: "shelter" }
+  ],
+  "CELLTOWER-2": [
+    { id: "WORKFORCE-01", name: "WorkForceCamp1", role: "workforce" },
+    { id: "WORKFORCE-02", name: "WorkForceCamp2", role: "workforce" },
+    { id: "SHELTER-C", name: "ShelterCamp2", role: "shelter" }
+  ]
+};
+
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -145,6 +158,7 @@ async function buildInfraStatus() {
     satellite: byKey.satellite.status,
     celltower1: byKey["celltower-1"].status,
     celltower2: byKey["celltower-2"].status,
+    towerCoverage: towerCoordinatorCoverage,
     details: byKey
   };
 }

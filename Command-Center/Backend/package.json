@@ -1,7 +1,7 @@
 {
   "name": "sanjeevani-cloud-api",
   "version": "1.0.0",
-  "description": "In-memory SANJEEVANI cloud API for pod request intake.",
+  "description": "SANJEEVANI cloud API backend for pod request intake, realtime updates, and MongoDB persistence.",
   "main": "server.js",
   "private": true,
   "scripts": {
@@ -10,6 +10,8 @@
   "dependencies": {
     "axios": "^1.7.9",
     "cors": "^2.8.5",
-    "express": "^4.18.3"
+    "express": "^4.18.3",
+    "mongoose": "^8.9.5",
+    "socket.io": "^4.8.1"
   }
 }
