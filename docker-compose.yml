@@ -322,7 +322,8 @@ services:
     networks:
       - sanjeevani-net
 
-<<<<<<< HEAD
+
+
   hospital-1-coordinator:
     build: ./coordinators
     container_name: sanjeevani-hospital-1-coordinator
@@ -518,7 +519,9 @@ services:
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
     volumes:
       - ./coordinator-data/flood-01:/app/data
-=======
+    networks:
+      - sanjeevani-net
+
   sensor-simulator:
     build: ./sensor-simulator
     container_name: sanjeevani-sensor-simulator
@@ -538,17 +541,12 @@ services:
     environment:
       PORT: 9400
       TICK_MS: 4000
->>>>>>> Integration-UI
     networks:
       - sanjeevani-net
 
 networks:
   sanjeevani-net:
-<<<<<<< HEAD
     name: sanjeevani-net
 
 volumes:
   mongo-data:
-=======
-    name: sanjeevani-net
->>>>>>> Integration-UI
