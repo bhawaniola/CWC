@@ -397,13 +397,14 @@ setInterval(() => loadStatus().catch(() => {}), 3000);
 
 // --- Live sensor feed --------------------------------------------------
 // sensor-simulator is a separate container, but its port is published to
-// the host (see docker-compose.yml "9400:9400"), so this page's own JS can
-// call it directly at localhost:9400 - no proxy route needed on this
-// server. Thresholds below are copied from pod-agent's hazardPackService.js
+// the host. docker-compose.yml maps it as "9500:9400" (host:container) -
+// port 9400 on the HOST is actually the newer command-center service, so
+// this page's own JS must call localhost:9500, not 9400, to reach it.
+// Thresholds below are copied from pod-agent's hazardPackService.js
 // purely for the "normal/warning/critical" badge - they don't change any
 // alerting logic, that still happens on the pod side.
 
-const SENSOR_API_BASE = "http://localhost:9400";
+const SENSOR_API_BASE = "http://localhost:9500";
 
 const HAZARD_THRESHOLDS = {
   water_level: 150,

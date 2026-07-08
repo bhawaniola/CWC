@@ -537,7 +537,7 @@ services:
       - pod-09
       - pod-10
     ports:
-      - "9400:9400"
+      - "9500:9400"
     environment:
       PORT: 9400
       TICK_MS: 4000

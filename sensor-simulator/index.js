@@ -3,7 +3,7 @@ const cors = require("cors");
 const axios = require("axios");
 
 const app = express();
-const PORT = process.env.PORT || 9400;
+const PORT = process.env.PORT || 9500;
 const TICK_MS = Number(process.env.TICK_MS || 4000);
 
 app.use(cors());
