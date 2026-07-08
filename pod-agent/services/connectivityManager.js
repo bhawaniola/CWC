@@ -553,41 +553,33 @@ async function forwardViaRoute(route, request) {
   return response.data;
 }
 
-// Hazard alerts and security events are not "local only" anymore: they are
-// enqueued as special request categories and ride the SAME store-and-forward
-// ladder as citizen SOS (satellite -> cellular -> mesh -> island queue).
-// When an EARLY-WARNING reaches the cloud, the cloud answers with an
-// Ed25519-signed broadcast to every pod.
-function enqueueSystemEvent(category, fields) {
-  const identity = getPodIdentity();
-  const event = {
-    id: crypto.randomUUID(),
-    podId: identity.podId,
-    podName: identity.podName,
-    region: identity.region,
-    name: category === "SECURITY" ? "POD-SHIELD" : "HAZARD-SENSOR",
-    category,
-    location: identity.podName,
-    language: { code: "en", name: "English", nativeName: "English", speechLocale: "en-IN" },
-    syncStatus: "pending",
-    createdAt: new Date().toISOString(),
-    ...fields
-  };
-  localQueue.enqueue(event);
-  console.log(`[connectivity] ${podInfo.podId} queued ${category} event ${event.id} for cloud sync`);
-  return { success: true, queued: true, id: event.id };
-}
 
+
+// Fired hazard alerts now ride the exact same satellite -> cellular -> mesh -> local
+// cache pipeline as SOS requests, instead of only being logged locally. Dropping the
+// alert into localQueue means the existing syncWorker (already running every 5s, plus
+// triggered immediately after submission) will attempt to send it out on its next pass
+// and will keep retrying automatically until a path is available.
 async function sendPodAlert(alert) {
-  return enqueueSystemEvent("EARLY-WARNING", {
-    hazard: alert.hazard,
-    message: alert.message,
-    triage: {
-      severity: alert.severity || 9,
-      priority: "critical",
-      reason: alert.trigger || "hazard pack triggered"
-    }
-  });
+  const identity = getPodIdentity();
+  const queuedAlert = {
+    ...alert,
+    id: alert.id || `alert-${Date.now()}`,
+    type: "hazard-alert",
+    podId: alert.podId || identity.podId,
+    podName: alert.podName || identity.podName,
+    region: alert.region || identity.region,
+    syncStatus: "queued-at-origin-pod",
+    queuedAt: new Date().toISOString()
+  };
+
+  localQueue.enqueue(queuedAlert);
+
+  console.log(
+    `[connectivity] ${podInfo.podId} queued hazard alert ${queuedAlert.id} (${queuedAlert.hazard || "unknown hazard"}) for satellite/cellular/mesh sync`
+  );
+
+  return { success: true, queued: true, id: queuedAlert.id };
 }
 
 async function sendSecurityEvent(event) {

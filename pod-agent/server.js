@@ -591,6 +591,10 @@ app.post("/api/sensors", async (req, res) => {
       }
     }
 
+
+    // A hazard just got queued for satellite/cellular/mesh sync above - wake the
+    // sync worker immediately instead of waiting for its 5s auto-interval, same
+    // as citizen SOS submissions do.
     if (result.fired.length > 0) {
       triggerQueueSync("hazard-alert");
     }
@@ -615,6 +619,7 @@ app.post("/sensor", async (req, res) => {
   req.url = "/api/sensors";
   app.handle(req, res);
 });
+
 
 // Per-device rate limiting (token bucket): protects the shared uplink from a
 // stuck retry loop or a hostile flood without ever blocking a first SOS.
@@ -648,6 +653,57 @@ function rateLimitRequests(req, res, next) {
   rateBuckets.set(key, bucket);
   return next();
 }
+
+// Meraki MT30-style smart automation button. A physical press at a camp doesn't
+// carry sensor thresholds - it's an unambiguous "someone needs help now" signal,
+// so it skips hazardPackService entirely and drops straight into the same SOS
+// request pipeline (queue -> satellite/cellular/mesh -> cloud, or cache if none
+// are reachable) that the citizen-facing form uses.
+app.post("/api/sensors/button", async (req, res) => {
+  try {
+    const route = await connectivity.calculateMode();
+    const body = {
+      name: req.body?.name || "Meraki MT30 Smart Button",
+      category: "Rescue",
+      message:
+        req.body?.message ||
+        "Meraki MT30 automation button pressed at this pod. Immediate on-site assistance requested.",
+      location: req.body?.location || "",
+      language: req.body?.language
+    };
+
+    const request = createRequest(body, route);
+
+    // A pressed button is inherently urgent regardless of message wording,
+    // so it always gets top priority rather than depending on keyword triage.
+    request.category = "Medical/Rescue";
+    request.triage = {
+      severity: 9,
+      priority: "critical",
+      reason: "Meraki MT30 smart automation button pressed on-site."
+    };
+
+    const queuedRequest = queueLocal(request, "queued-at-origin-pod");
+    triggerQueueSync("mt30-button");
+
+    console.log(
+      `[pod-agent] ${connectivity.podInfo.podId} MT30 button press queued as ${request.id}`
+    );
+
+    return res.status(202).json(
+      responseForRequest(
+        "MT30 button press queued at this pod. Sync worker will try satellite, cellular, then pod mesh.",
+        queuedRequest,
+        route
+      )
+    );
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
 
 app.post("/api/requests", rateLimitRequests, async (req, res) => {
   const validationError = validateRequestBody(req.body);
