@@ -5,6 +5,7 @@ const cors = require("cors");
 const axios = require("axios");
 const mongoose = require("mongoose");
 const { Server } = require("socket.io");
+const aiTriage = require("./services/aiTriage");
 
 const app = express();
 const server = http.createServer(app);
@@ -741,7 +742,17 @@ async function readLinkHealth(url) {
   }
 }
 
+// Link health is cached briefly so a burst of requests (batch sync, crowd
+// surge) doesn't trigger one satellite/tower health probe per SOS — a batch
+// of 100 used to mean 300 sequential HTTP checks before any delivery.
+const LINK_HEALTH_CACHE_MS = Number(process.env.LINK_HEALTH_CACHE_MS || 2500);
+let deliveryLinksCache = { at: 0, value: null };
+
 async function readDeliveryLinks() {
+  if (deliveryLinksCache.value && Date.now() - deliveryLinksCache.at < LINK_HEALTH_CACHE_MS) {
+    return deliveryLinksCache.value;
+  }
+
   const [satelliteStatus, towerStatuses] = await Promise.all([
     readLinkHealth(SATELLITE_URL),
     Promise.all(
@@ -752,7 +763,7 @@ async function readDeliveryLinks() {
     )
   ]);
 
-  return {
+  const links = {
     satellite: {
       name: "satellite",
       type: "satellite",
@@ -761,6 +772,8 @@ async function readDeliveryLinks() {
     },
     towers: towerStatuses
   };
+  deliveryLinksCache = { at: Date.now(), value: links };
+  return links;
 }
 
 function upsertDeliveryInMemory(delivery) {
@@ -1060,6 +1073,29 @@ async function routeRequestToCoordinators(request, duplicate = false) {
     }));
     classification.summary = classification.departments.map((item) => item.label).join(", ");
   }
+
+  // AI triage may have identified responder roles the keywords missed
+  // ("chest feels heavy" -> hospital). Union them in: AI adds targets, it
+  // never removes what the rules already matched — and it never overrides
+  // a hazard pack's declared roles.
+  const aiRoles =
+    declaredRoles.length === 0 && Array.isArray(request.aiTriage?.roles)
+      ? request.aiTriage.roles.filter(
+          (role) => ROUTING_RULES[role] && !classification.roles.includes(role)
+        )
+      : [];
+  if (aiRoles.length > 0) {
+    classification.roles = [...classification.roles, ...aiRoles];
+    classification.departments = [
+      ...classification.departments,
+      ...aiRoles.map((role) => ({
+        role,
+        label: ROUTING_RULES[role].label,
+        evidence: [`AI triage: ${request.aiTriage.reason || "identified this responder role"}`]
+      }))
+    ];
+    classification.summary = classification.departments.map((item) => item.label).join(", ");
+  }
   const targets = targetsWithStock(
     coordinatorTargetsForClassification(classification),
     classification.roles
@@ -1126,6 +1162,176 @@ async function routeRequestToCoordinators(request, duplicate = false) {
 
   emitRealtime(duplicate ? "request:updated" : "request:routed", requests[requestIndex] || routedRequest);
   return deliveries;
+}
+
+// ---- AI triage (enhancer, never gatekeeper) --------------------------------
+// The local LLM re-reads every citizen SOS AFTER it is stored, routed, and
+// delivered. It can only confirm or UPGRADE severity — never downgrade — and
+// it can add responder roles the keywords missed. If the model is slow, dead,
+// or wrong, the keyword triage already did its job and nothing is blocked.
+
+const aiTriageInFlight = new Set();
+const AI_RETRY_SWEEP_MS = Number(process.env.AI_RETRY_SWEEP_MS || 60000);
+
+function aiTriageEligible(request) {
+  return (
+    aiTriage.AI_ENABLED &&
+    !isCoordinatorEvent(request) &&
+    !["EARLY-WARNING", "SECURITY"].includes(request.category)
+  );
+}
+
+async function applyAiTriage(request) {
+  if (
+    !request?.id ||
+    !aiTriageEligible(request) ||
+    request.aiTriage?.status === "complete" ||
+    aiTriageInFlight.has(request.id)
+  ) {
+    return;
+  }
+
+  aiTriageInFlight.add(request.id);
+  try {
+    const verdict = await aiTriage.triageRequest(request);
+    const index = requests.findIndex((item) => item.id === request.id);
+    if (index < 0) {
+      return; // request was deleted while the model was thinking
+    }
+
+    const current = requests[index];
+    const ruleSeverity = severityNumber(current);
+    const mergedSeverity = Math.max(ruleSeverity, verdict.severity);
+    const upgraded = verdict.severity > ruleSeverity;
+    const nowCritical = current.isCritical || mergedSeverity >= 8;
+
+    requests[index] = {
+      ...current,
+      triage: {
+        ...(current.triage || {}),
+        severity: mergedSeverity,
+        ...(upgraded ? { reason: verdict.reason || current.triage?.reason } : {})
+      },
+      isCritical: nowCritical,
+      criticality: nowCritical ? "critical" : current.criticality,
+      criticalReason: upgraded && nowCritical ? `AI triage: ${verdict.reason}` : current.criticalReason,
+      aiTriage: {
+        ...verdict,
+        status: "complete",
+        previousSeverity: ruleSeverity,
+        upgraded
+      },
+      cloudUpdatedAt: nowIso()
+    };
+
+    await persistDocument(CloudRequest, { id: request.id }, requests[index]);
+    emitRealtime("request:updated", requests[index]);
+    console.log(
+      `[cloud-api][ai][${request.id}] ${
+        upgraded ? `UPGRADED severity ${ruleSeverity} -> ${verdict.severity}` : `confirmed severity ${ruleSeverity}`
+      } (${verdict.model}, ${verdict.tookMs}ms): ${verdict.reason}`
+    );
+
+    // Re-route so responder roles the AI identified get a delivery and the
+    // refreshed payload (with the AI severity) reaches coordinator queues.
+    // Already-delivered coordinators are skipped by the delivery guard and
+    // pick the upgrade up through their normal cloud pull.
+    await routeRequestToCoordinators(requests[index], true);
+  } catch (error) {
+    const index = requests.findIndex((item) => item.id === request.id);
+    if (index >= 0 && requests[index].aiTriage?.status !== "complete") {
+      requests[index] = {
+        ...requests[index],
+        aiTriage: {
+          status: "unavailable",
+          model: aiTriage.AI_MODEL,
+          error: String(error.message || error).slice(0, 200),
+          evaluatedAt: nowIso()
+        }
+      };
+      await persistDocument(CloudRequest, { id: request.id }, requests[index]);
+      emitRealtime("request:updated", requests[index]);
+    }
+    console.warn(`[cloud-api][ai][${request.id}] triage unavailable, keeping rule-based verdict: ${error.message}`);
+  } finally {
+    aiTriageInFlight.delete(request.id);
+  }
+}
+
+// Requests that arrived while the model was still loading (or Ollama was
+// down) get retried here, a few per sweep so a backlog never floods the CPU.
+async function retryPendingAiTriage() {
+  const pending = requests
+    .filter(
+      (request) =>
+        aiTriageEligible(request) &&
+        request.aiTriage?.status !== "complete" &&
+        !aiTriageInFlight.has(request.id)
+    )
+    .slice(0, 3);
+
+  for (const request of pending) {
+    await applyAiTriage(request);
+  }
+}
+
+// ---- SITREP: AI situation report for the EOC operator ----------------------
+
+let lastSitrep = null;
+
+function isResolvedCloudRequest(request) {
+  return (Array.isArray(request.resolutions) ? request.resolutions : []).some(
+    (item) => item.status === "resolved"
+  );
+}
+
+async function buildSitrepSnapshot() {
+  const openCitizen = requests.filter(
+    (request) => aiTriageEligible(request) && !isResolvedCloudRequest(request)
+  );
+  const shortages = [];
+  for (const [coordinatorId, fields] of coordinatorShortageLevels.entries()) {
+    for (const [fieldId, level] of fields.entries()) {
+      const coordinator = COORDINATORS.find((item) => item.id === coordinatorId);
+      shortages.push({
+        coordinator: coordinator?.name || coordinatorId,
+        role: coordinator?.role || "",
+        resource: fieldId,
+        level
+      });
+    }
+  }
+  const links = await readDeliveryLinks();
+
+  return {
+    generatedAt: nowIso(),
+    network: {
+      satellite: links.satellite.status,
+      cellTowers: links.towers.map((tower) => ({ name: tower.name, status: tower.status }))
+    },
+    openRequests: openCitizen.slice(0, 15).map((request) => ({
+      severity: severityNumber(request),
+      critical: Boolean(request.isCritical),
+      category: request.category || "",
+      message: String(request.message || "").slice(0, 140),
+      location: request.locationName || request.location || "",
+      pod: request.podId || "",
+      aiReason: request.aiTriage?.reason || ""
+    })),
+    counts: {
+      open: openCitizen.length,
+      critical: openCitizen.filter((request) => request.isCritical).length,
+      queuedDeliveries: coordinatorDeliveries.filter(
+        (delivery) => !["delivered", "resolved", "rejected"].includes(delivery.status)
+      ).length
+    },
+    shortages,
+    recentAlerts: alertsSent.slice(0, 5).map((alert) => ({
+      hazard: alert.hazard,
+      message: String(alert.message || "").slice(0, 120),
+      issuedAt: alert.issuedAt
+    }))
+  };
 }
 
 let activeDeliveryRetry = null;
@@ -1306,6 +1512,8 @@ async function storeRequest(body) {
   const duplicate = existingIndex >= 0;
 
   if (duplicate) {
+    const existingSeverity = severityNumber(requests[existingIndex]);
+    const incomingSeverity = severityNumber(request);
     requests[existingIndex] = {
       ...requests[existingIndex],
       ...request,
@@ -1315,6 +1523,16 @@ async function storeRequest(body) {
       cloudReceivedAt: requests[existingIndex].cloudReceivedAt || request.cloudReceivedAt,
       resolutions: requests[existingIndex].resolutions || request.resolutions,
       routing: requests[existingIndex].routing || request.routing,
+      // A re-arrival still carries the origin pod's keyword severity — it
+      // must never downgrade a severity the AI (or a rule) already raised.
+      triage: {
+        ...(requests[existingIndex].triage || {}),
+        ...(request.triage || {}),
+        severity: Math.max(existingSeverity, incomingSeverity)
+      },
+      isCritical: requests[existingIndex].isCritical || request.isCritical,
+      criticality:
+        requests[existingIndex].criticality === "critical" ? "critical" : request.criticality,
       cloudUpdatedAt: nowIso()
     };
   } else {
@@ -1429,6 +1647,12 @@ async function storeRequest(body) {
   }
 
   await routeRequestToCoordinators(storedRequest, duplicate);
+
+  // Fire-and-forget: the SOS is already stored, queued, and delivered before
+  // the model ever sees it. A slow or dead model can never block an SOS.
+  applyAiTriage(requests.find((item) => item.id === storedRequest.id) || storedRequest).catch(
+    (error) => console.warn(`[cloud-api][ai] background triage failed: ${error.message}`)
+  );
 
   return {
     request: requests.find((item) => item.id === storedRequest.id) || storedRequest,
@@ -1566,6 +1790,32 @@ app.get("/api/health", (req, res) => {
       checkedAt: nowIso()
     }
   });
+});
+
+app.get("/api/ai/health", async (req, res) => {
+  res.json({ success: true, data: await aiTriage.aiHealth() });
+});
+
+// AI situation report: the operator presses one button and gets a 30-second
+// plain-English SITREP built only from facts already in the cloud store.
+app.post("/api/sitrep", async (req, res) => {
+  try {
+    const snapshot = await buildSitrepSnapshot();
+    const sitrep = await aiTriage.generateSitrep(snapshot);
+    lastSitrep = { ...sitrep, facts: snapshot.counts };
+    console.log(`[cloud-api][ai] SITREP generated in ${sitrep.tookMs}ms (${snapshot.counts.open} open requests)`);
+    res.json({ success: true, data: lastSitrep });
+  } catch (error) {
+    console.warn(`[cloud-api][ai] SITREP failed: ${error.message}`);
+    res.status(503).json({
+      success: false,
+      message: `AI situation report unavailable: ${error.message}`
+    });
+  }
+});
+
+app.get("/api/sitrep", (req, res) => {
+  res.json({ success: true, data: lastSitrep });
 });
 
 app.get("/api/pubkey", (req, res) => {
@@ -1818,6 +2068,17 @@ async function start() {
       console.warn(`[cloud-api] coordinator delivery retry failed: ${error.message}`);
     });
   }, DELIVERY_RETRY_INTERVAL_MS);
+
+  if (aiTriage.AI_ENABLED) {
+    aiTriage.aiHealth().then((health) => {
+      console.log(`[cloud-api][ai] model=${health.model} status=${health.status} at ${health.url}`);
+    });
+    setInterval(() => {
+      retryPendingAiTriage().catch((error) => {
+        console.warn(`[cloud-api][ai] retry sweep failed: ${error.message}`);
+      });
+    }, AI_RETRY_SWEEP_MS);
+  }
 }
 
 start().catch((error) => {

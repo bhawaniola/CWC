@@ -2470,3 +2470,41 @@ select {
   font-size: 12px;
   font-weight: 800;
 }
+
+/* ---- AI triage line on inbox cards ---- */
+
+.ai-triage-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid #d8e6f7;
+  background: #f4f9ff;
+  color: #33507a;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.ai-triage-line svg {
+  flex-shrink: 0;
+  color: #7c5cff;
+}
+
+.ai-triage-line b {
+  flex-shrink: 0;
+  color: #5b3fd4;
+  font-weight: 800;
+}
+
+.ai-triage-line.upgraded {
+  border-color: #f3d4d9;
+  background: #fff4f5;
+}
+
+.ai-triage-line.upgraded svg,
+.ai-triage-line.upgraded b {
+  color: #d0293f;
+}

@@ -357,6 +357,30 @@ app.post("/api/infra/restore-all", async (req, res) => {
   res.json({ success: true, results });
 });
 
+// AI triage + SITREP -> proxy to the cloud API (which talks to the local
+// Ollama model). Generation can take a while on CPU, hence the long timeout.
+app.get("/api/ai/health", async (req, res) => {
+  const payload = await getJson(`${CLOUD_URL}/api/ai/health`, 4000);
+  res.json({ success: true, data: payload?.data || { status: "unreachable" } });
+});
+
+app.get("/api/sitrep", async (req, res) => {
+  const payload = await getJson(`${CLOUD_URL}/api/sitrep`, 4000);
+  res.json({ success: true, data: payload?.data || null });
+});
+
+app.post("/api/sitrep", async (req, res) => {
+  try {
+    const response = await axios.post(`${CLOUD_URL}/api/sitrep`, {}, { timeout: 120000 });
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 502).json({
+      success: false,
+      message: error.response?.data?.message || error.message
+    });
+  }
+});
+
 // Broadcast a signed alert to every pod (via the cloud's Ed25519 signer).
 app.post("/api/broadcast", async (req, res) => {
   try {

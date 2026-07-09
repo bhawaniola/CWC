@@ -21,6 +21,7 @@ import {
   Shield,
   Siren,
   Satellite,
+  Sparkles,
   TrendingUp,
   Users,
   Waves,
@@ -646,6 +647,17 @@ function RequestCard({ request, index }) {
         <StatusPill request={request} />
       </div>
       <p>{request.message || request.details || "Emergency request routed to coordinators."}</p>
+      {request.aiTriage?.status === "complete" && (
+        <p className={`ai-triage-line ${request.aiTriage.upgraded ? "upgraded" : ""}`}>
+          <Sparkles size={13} />
+          <b>
+            {request.aiTriage.upgraded
+              ? `AI upgraded ${request.aiTriage.previousSeverity} → ${request.aiTriage.severity}`
+              : "AI confirmed"}
+          </b>
+          {request.aiTriage.reason}
+        </p>
+      )}
       <div className="request-meta-grid">
         <span><MapPin size={15} /> {destination}</span>
         <span><ClipboardList size={15} /> {requestTypes}</span>
@@ -954,6 +966,66 @@ function ActivityFeed({ logs, setRoute }) {
   );
 }
 
+function SitrepPanel() {
+  const [sitrep, setSitrep] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    api("/api/sitrep")
+      .then((result) => {
+        if (mounted && result?.data?.report) setSitrep(result.data);
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  const generate = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api("/api/sitrep", { method: "POST" });
+      if (result?.success && result.data?.report) {
+        setSitrep(result.data);
+      } else {
+        setError(result?.message || "AI model is still loading — try again in a minute.");
+      }
+    } catch (requestError) {
+      setError("AI model unreachable — rule-based operations continue unaffected.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="panel sitrep-panel">
+      <div className="panel-head">
+        <h3><Sparkles size={16} /> AI Situation Report</h3>
+        <button onClick={generate} disabled={loading}>
+          {loading ? "Analyzing network…" : sitrep ? "Regenerate" : "Generate SITREP"}
+        </button>
+      </div>
+      {error && <p className="sitrep-error">{error}</p>}
+      {sitrep ? (
+        <>
+          <pre className="sitrep-text">{sitrep.report}</pre>
+          <p className="sitrep-meta">
+            {sitrep.model} · generated {ago(sitrep.generatedAt)} in {Math.round((sitrep.tookMs || 0) / 1000)}s ·
+            {` ${sitrep.facts?.open ?? 0} open / ${sitrep.facts?.critical ?? 0} critical`}
+          </p>
+        </>
+      ) : !error && (
+        <div className="sitrep-empty">
+          <Sparkles size={24} />
+          <b>No report yet</b>
+          <span>The local AI reads every open request, shortage, and sensor alert and writes a 30-second briefing. Runs fully offline inside the cluster.</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Dashboard({ overview, requests, setRoute }) {
   const [fullMapOpen, setFullMapOpen] = useState(false);
   const mode = deriveMode(overview.infra);
@@ -976,6 +1048,7 @@ function Dashboard({ overview, requests, setRoute }) {
       <div className="dashboard-grid">
         <div className="dashboard-col">
           <RecentRequests requests={displayRequests} total={overview.counts.activeRequests} setRoute={setRoute} />
+          <SitrepPanel />
           <SensorFeedPanel overview={overview} setRoute={setRoute} />
         </div>
 
@@ -1213,6 +1286,40 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
                     <small>{targets.length ? "Matched from department rules and tower coverage." : "Route will appear when the request is classified."}</small>
                   </div>
                 </div>
+
+                {request.aiTriage ? (
+                  <div
+                    className={`ai-verdict ${
+                      request.aiTriage.status === "complete"
+                        ? request.aiTriage.upgraded
+                          ? "upgraded"
+                          : "confirmed"
+                        : "unavailable"
+                    }`}
+                  >
+                    <Sparkles size={16} />
+                    {request.aiTriage.status === "complete" ? (
+                      <div>
+                        <b>
+                          AI triage: severity {request.aiTriage.severity}
+                          {request.aiTriage.upgraded
+                            ? ` — upgraded from ${request.aiTriage.previousSeverity}`
+                            : " — confirms rule-based verdict"}
+                        </b>
+                        <small>
+                          {request.aiTriage.reason}
+                          {request.aiTriage.roles?.length ? ` · roles: ${request.aiTriage.roles.join(", ")}` : ""}
+                          {` · ${request.aiTriage.model}`}
+                        </small>
+                      </div>
+                    ) : (
+                      <div>
+                        <b>Rule-based triage active</b>
+                        <small>AI model unavailable — the keyword verdict stands and nothing was blocked.</small>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
 
                 <div className="coordinator-status-list">
                   {requestDeliveries.length ? requestDeliveries.map((delivery) => {

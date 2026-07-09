@@ -50,7 +50,8 @@ def check(label, ok, detail=""):
 
 
 try:
-    start("cloud", "cloud-api", {"PORT": "9000", "POD_URLS": "POD-01=http://127.0.0.1:8001"})
+    start("cloud", "Command-Center/Backend", {"PORT": "9000", "POD_URLS": "POD-01=http://127.0.0.1:8001",
+                                            "AI_TRIAGE_ENABLED": "false"})
     start("satellite", "link-node", {"PORT": "9100", "LINK_ID": "satellite",
                                      "LINK_TYPE": "satellite",
                                      "CLOUD_URL": "http://127.0.0.1:9000"})

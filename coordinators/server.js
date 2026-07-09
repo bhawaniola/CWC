@@ -368,10 +368,28 @@ function defaultState() {
   };
 }
 
+// One entry per request id — repairs any state written before dedup existed.
+// Lists are newest-first, so keeping the first occurrence keeps the newest.
+function dedupeById(list) {
+  const seen = new Set();
+  return list.filter((item) => {
+    if (!item?.id) {
+      return true;
+    }
+    if (seen.has(item.id)) {
+      return false;
+    }
+    seen.add(item.id);
+    return true;
+  });
+}
+
 function mergeState(saved) {
   const base = defaultState();
   const savedFields = Array.isArray(saved.fields) ? saved.fields : [];
   const savedFieldById = new Map(savedFields.map((field) => [field.id, field]));
+  const savedHistory = dedupeById(Array.isArray(saved.history) ? saved.history : []);
+  const resolvedIds = new Set(savedHistory.map((item) => item.id));
 
   return {
     ...base,
@@ -383,8 +401,12 @@ function mergeState(saved) {
     })),
     tasks: Array.isArray(saved.tasks) && saved.tasks.length ? saved.tasks : base.tasks,
     incidents: Array.isArray(saved.incidents) && saved.incidents.length ? saved.incidents : base.incidents,
-    inbox: Array.isArray(saved.inbox) ? saved.inbox : [],
-    history: Array.isArray(saved.history) ? saved.history : [],
+    // Anything already in history must not also sit in the inbox — repairs
+    // requests that resurrected via the cloud pull before this guard existed.
+    inbox: dedupeById(Array.isArray(saved.inbox) ? saved.inbox : []).filter(
+      (item) => !resolvedIds.has(item.id)
+    ),
+    history: savedHistory,
     hazardUpdates: Array.isArray(saved.hazardUpdates) ? saved.hazardUpdates : base.hazardUpdates
   };
 }
@@ -806,6 +828,14 @@ function matchesCoordinatorRole(payload) {
   return roleTemplate.matchKeywords.some((keyword) => text.includes(keyword));
 }
 
+// Severity words in climbing order — merges pick the higher of two labels so
+// a late duplicate can never bury a card the cloud's AI already upgraded.
+const SEVERITY_RANK = { info: 0, low: 1, medium: 2, high: 3, critical: 4 };
+
+function higherSeverity(left, right) {
+  return (SEVERITY_RANK[left] ?? 0) >= (SEVERITY_RANK[right] ?? 0) ? left : right;
+}
+
 function normalizeSeverity(payload) {
   const raw = String(payload.severity || payload.triage?.severity || payload.priority || "").toLowerCase();
   if (["critical", "high", "medium", "low", "info"].includes(raw)) {
@@ -814,9 +844,11 @@ function normalizeSeverity(payload) {
 
   const numeric = Number(raw);
   if (Number.isFinite(numeric)) {
+    // Same boundaries as the Command Center's severityLabel, so the same
+    // request never reads LOW on one screen and MEDIUM on another.
     if (numeric >= 8) return "critical";
     if (numeric >= 6) return "high";
-    if (numeric >= 3) return "medium";
+    if (numeric >= 4) return "medium";
     return "low";
   }
 
@@ -843,6 +875,43 @@ function storeIncoming(payload, meta = {}) {
 
   const state = getState();
   const receivedAt = new Date().toISOString();
+
+  // A request this coordinator already marked handled must NEVER resurrect
+  // into the inbox. The cloud keeps every request forever and re-sends the
+  // whole list on the 6s pull, and a mesh copy can arrive minutes later —
+  // local history is the source of truth. The cloud copy's own resolutions
+  // list covers the case where this coordinator's data volume was wiped.
+  const historyIndex = payload.id
+    ? state.history.findIndex((existing) => existing.id === payload.id)
+    : -1;
+  const resolvedAtCloud =
+    Array.isArray(payload.resolutions) &&
+    payload.resolutions.some(
+      (entry) => entry.coordinatorId === identity.coordinatorId && entry.status === "resolved"
+    );
+  if (historyIndex >= 0 || resolvedAtCloud) {
+    if (historyIndex >= 0) {
+      // Keep the archived card current (an AI verdict may arrive after the
+      // field team already closed the case) without changing its position.
+      const historyItem = state.history[historyIndex];
+      state.history[historyIndex] = {
+        ...historyItem,
+        severity: higherSeverity(historyItem.severity, normalizeSeverity(payload)),
+        aiTriage:
+          (payload.aiTriage?.status === "complete" ? payload.aiTriage : null) ||
+          historyItem.aiTriage ||
+          null,
+        lastSeenAt: receivedAt
+      };
+      saveState(state);
+    }
+
+    return {
+      accepted: true,
+      alreadyResolved: true,
+      item: historyIndex >= 0 ? state.history[historyIndex] : null
+    };
+  }
   const routing = payload.routing || {};
   const route = payload.deliveryRoute || {};
   const classification = routing.classification || {};
@@ -878,6 +947,9 @@ function storeIncoming(payload, meta = {}) {
     },
     matchedDepartments: departmentLabels,
     routingSummary: classification.summary || departmentLabels.join(", ") || "",
+    // AI triage verdict rides down from the cloud with the delivery/pull; a
+    // direct radio copy arrives without one and must not erase it on merge.
+    aiTriage: payload.aiTriage?.status === "complete" ? payload.aiTriage : null,
     // When the request was created at the origin pod — can be much earlier
     // than receivedAt if it waited in an offline queue before syncing.
     originatedAt: payload.createdAt || payload.queuedAt || payload.receivedAt || "",
@@ -906,6 +978,10 @@ function storeIncoming(payload, meta = {}) {
         lastSeenAt: receivedAt,
         workStatus: existingItem.workStatus || item.workStatus,
         acknowledgedAt: existingItem.acknowledgedAt || item.acknowledgedAt,
+        // Severity only climbs, and an AI verdict is never erased by a copy
+        // that arrived over a path the verdict hasn't reached yet.
+        severity: higherSeverity(existingItem.severity, item.severity),
+        aiTriage: item.aiTriage || existingItem.aiTriage || null,
         seenVia: Array.from(
           new Set([
             ...(Array.isArray(existingItem.seenVia) ? existingItem.seenVia : [existingItem.transport]),
@@ -1382,7 +1458,9 @@ function acceptCoordinatorInbox(req, res) {
   res.status(202).json({
     success: true,
     accepted: true,
-    message: "Role-matched request stored at coordinator.",
+    message: result.alreadyResolved
+      ? "Request was already handled at this coordinator; it stays in Past history."
+      : "Role-matched request stored at coordinator.",
     data: result.item
   });
 }
@@ -1433,7 +1511,9 @@ app.patch("/api/coordinator/inbox/:requestId", async (req, res) => {
 
   if (nextStatus === "resolved") {
     state.inbox.splice(itemIndex, 1);
-    state.history = [item, ...state.history].slice(0, 50);
+    // One history entry per request id, ever — re-resolving a copy that came
+    // back over another path must replace the old entry, not add a twin.
+    state.history = [item, ...state.history.filter((entry) => entry.id !== item.id)].slice(0, 50);
   } else {
     state.inbox[itemIndex] = item;
   }

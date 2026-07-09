@@ -23,7 +23,8 @@ import {
   FiTruck,
   FiUserCheck,
   FiUsers,
-  FiWifi
+  FiWifi,
+  FiZap
 } from "react-icons/fi";
 
 import {
@@ -450,6 +451,13 @@ function FeedItem({ item, selected, busy, onSelect, onAction }) {
         <span>{item.severity}</span>
       </div>
       <p>{item.message}</p>
+      {item.aiTriage?.reason ? (
+        <p className={classNames("ai-triage-line", item.aiTriage.upgraded && "upgraded")}>
+          <FiZap aria-hidden="true" />
+          <b>{item.aiTriage.upgraded ? "AI upgraded" : "AI"}</b>
+          {item.aiTriage.reason}
+        </p>
+      ) : null}
       {(item.targetCoordinatorName || item.routingSummary || item.matchedDepartments?.length) ? (
         <div className="feed-route-meta">
           {item.targetCoordinatorName ? <span>Target: {item.targetCoordinatorName}</span> : null}

@@ -39,6 +39,10 @@ Three design principles run through the whole system:
 docker compose up -d --build
 ```
 
+The first start downloads the local AI model (~2 GB, one time) into the
+`ollama-models` volume; AI triage comes online a few minutes later. Everything
+else works immediately — the AI is an enhancer, never a dependency.
+
 Open:
 
 ```text
@@ -69,8 +73,11 @@ Sensor simulator API:      http://localhost:9500/status
 ```text
 command-center           EOC dashboard aggregating the whole network (port 9400)
 cloud-api                backend API: MongoDB storage, keyword routing, delivery
-                         receipts, resolution tracking, signed alerts (port 9000)
+                         receipts, resolution tracking, signed alerts, AI triage
+                         worker + SITREP generator (port 9000)
 mongodb                  persistent database for the cloud API
+ollama                   local LLM (qwen2.5:3b) for AI triage + SITREP; runs
+                         fully inside the cluster, no external API (port 11434)
 satellite                satellite middleman forwarding to cloud-api
 celltower-1 / -2         cellular middlemen forwarding to cloud-api
 simulation-controller    fails/restores satellite + towers, drives sensor spikes
@@ -171,6 +178,41 @@ Citizen SOS triage happens at the pod (`pod-agent/services/triageService.js`):
 critical keywords (breathing/oxygen/suffocation, bleeding, trapped, drowning,
 ...in 12 languages) -> severity 9 CRITICAL; essential-need keywords (food,
 water, medicine, shelter) -> 6 HIGH; otherwise 3 LOW.
+
+## AI Triage + SITREP — smart when connected, safe when dark
+
+A local LLM (`ollama` container, qwen2.5:3b) lives at the cloud tier and
+re-reads every citizen SOS **after** it is already stored, queued, and
+delivered. Design rules, in order:
+
+1. **Enhancer, never gatekeeper.** Nothing waits for the model. If it is slow,
+   down, or still loading, the card just says "rule-based triage" and the
+   keyword verdict stands. Edge nodes (pods/coordinators) stay rule-based by
+   design — deterministic and battery-safe; intelligence lives where the data
+   aggregates and power exists.
+2. **Upgrade-only.** The AI can raise a severity or add responder roles the
+   keywords missed ("my chest feels heavy and I'm dizzy" -> severity 9,
+   hospital), but it can never downgrade or remove a rule match — and a late
+   duplicate arriving over another path can never bury an AI upgrade (severity
+   only climbs at every merge point: cloud store, delivery, coordinator inbox).
+3. **The correction travels.** An upgrade re-routes the request to the newly
+   identified coordinators and rides the normal delivery/pull paths down to
+   their inboxes, where the card jumps up the severity order with the AI's
+   one-line reason attached.
+4. **Pattern view.** The Command Center dashboard has an AI **SITREP** button:
+   the model reads every open request, shortage, sensor alert, and link status
+   and writes a 30-second plain-English briefing (SITUATION / CRITICAL /
+   RESOURCES / ACTIONS) — the cross-pod picture no single field team can see.
+
+The model runs entirely inside the cluster — no external API, no internet
+needed after the one-time pull — so the AI degrades exactly like the rest of
+the network. Endpoints: `GET /api/ai/health`, `POST /api/sitrep` (cloud 9000,
+proxied at the Command Center 9400). Verify the whole chain without Docker or
+the real model:
+
+```powershell
+py -3 integrations/ai_triage_test.py
+```
 
 ## 10-Pod Topology
 
@@ -313,7 +355,8 @@ curl.exe -X POST http://localhost:8001/api/pod/name -H "Content-Type: applicatio
 ## Improvements 
 
 All are verified by
-`integrations/integration_test.py` (13/13 checks, runs without Docker).
+`integrations/integration_test.py` (13/13 checks, runs without Docker) and
+`integrations/ai_triage_test.py` (12/12 checks on the AI chain, mock model).
 
 - **ThousandEyes idea, one rule (link physics).** `link-node` now applies real
   latency and packet loss. `GET /health` reports `up`/`degraded`/`down` based on
@@ -332,6 +375,12 @@ All are verified by
 - **Bandwidth answers (Q4).** Per-device **rate limiting** (token bucket, 429 on
   abuse, keyed by `x-device-id`) and **batch sync** (a backlog of >3 items syncs
   in one link transmission via `/api/forward-batch`).
+- **AI triage + SITREP** (see the dedicated section above): local LLM upgrades
+  keyword-missed emergencies, adds responder roles, and writes operator
+  briefings — offline-capable, upgrade-only, never blocking.
+- **Surge-proof link checks.** Cloud link health is cached for 2.5s, so a
+  batch of 100 queued SOS triggers 3 health probes instead of 300 — batch
+  sync completes inside one link transmission window.
 - **Demo scripts** in `integrations/`: `simulate_crowd.py` (surge realism),
   `inject_forged_alert.py` (Shield rejection).
 
@@ -369,6 +418,14 @@ py -3 integrations/integration_test.py
     SOS from POD-02 — the cloud logs `skipping Hospital1: reported
     out-of-stock` and delivers to Hospital 2 instead. Restock and routing
     returns to normal.
+14. **AI catches what keywords miss**: submit "my chest feels heavy and I'm
+    dizzy" at any pod — no critical keyword matches, so the card starts LOW.
+    Seconds later the AI upgrades it to CRITICAL severity 9 with the reason
+    "possible cardiac event", the hospital coordinator appears in routing,
+    and the card jumps to the top of the hospital inbox. Then press
+    **Generate SITREP** on the dashboard for the AI's 30-second briefing.
+    Kill the ollama container and repeat: everything still flows, cards
+    read "rule-based triage" — AI is an enhancer, never a gatekeeper.
 
 ## Stop And Reset
 
