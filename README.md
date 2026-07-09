@@ -1,8 +1,14 @@
-# SANJEEVANI Docker Pod Network
+# SANJEEVANI — Self-Healing Disaster Lifeline Network
 
-SANJEEVANI is a Docker simulation of a disaster SOS network with ten local pods, shared satellite/cellular middlemen, mesh relay, and island-mode local caching.
+SANJEEVANI is a Docker simulation of a complete disaster-response network: **ten citizen pods**, **nine relief-team coordinator dashboards** (hospitals, shelters, workforce camps, fire, flood rescue), a **Cisco Meraki-style sensor layer** that raises its own alarms, and an **EOC Command Center** — all connected by shared satellite/cellular link-nodes, URWB-style pod mesh relay, and island-mode local caching.
 
-Pods do not post directly to the cloud. A pod must forward through the satellite link-node, a configured cell tower link-node, or a mesh neighbor that still has one of those uplinks. If no path is available, the SOS is stored in that pod's local queue.
+Pods do not post directly to the cloud. A pod must forward through the satellite link-node, a configured cell tower link-node, or a mesh neighbor that still has one of those uplinks. If no path is available, the SOS is stored in that pod's local queue and retried every 5 seconds — **a message can be delayed, but it is never lost**.
+
+Three design principles run through the whole system:
+
+1. **Every message has two lives** — a local one (direct radio push to relief teams in range, works with zero internet) and a global one (store-and-forward to the cloud over whatever link survives).
+2. **Idempotency everywhere** — one ID per event, deduplication at every hop (`seenVia` records each path the same request arrived on), first-arrival timestamps that duplicates can never reset.
+3. **A closed feedback loop** — field actions flow back up: coordinators acknowledge/resolve requests, report resource shortages, and the Command Center routes new requests around out-of-stock teams and archives closed cases.
 
 ## Folder Structure
 
@@ -10,19 +16,22 @@ Pods do not post directly to the cloud. A pod must forward through the satellite
 .
 |-- docker-compose.yml
 |-- Command-Center/            # EOC frontend + cloud backend module
-|   |-- Frontend/              # command-center UI/proxy on port 9400
+|   |-- Frontend/              # command-center React/Vite UI + proxy on port 9400
 |   `-- Backend/               # cloud API on port 9000 with MongoDB + sockets
+|-- coordinators/              # shared relief-team dashboard image (9 containers)
+|   |-- client/                # React/Vite coordinator UI (tabs, lifecycle, history)
+|   `-- server.js              # role templates, inbox, sync queue, shortage events
 |-- link-node/                 # shared satellite and celltower service image
-|-- simulation-controller/     # global Docker stop/start controller on port 9300
+|-- sensor-simulator/          # simulated Meraki MT10/MT12/MT14 sensors + MT30 buttons
+|-- simulation-controller/     # network drill controller + sensor spike UI on port 9300
 |-- pod-agent/                 # shared pod backend and React/Vite citizen SOS UI
 |   |-- client/                # modular React frontend source
 |   |-- public/                # legacy static fallback
 |   `-- services/              # routing, queue, settings, hazard, triage modules
-|-- integrations/              # optional external demo feeders
-`-- pod-data/                  # generated runtime state, ignored by git
+|-- integrations/              # optional external demo feeders + integration test
+|-- pod-data/                  # generated pod runtime state, ignored by git
+`-- coordinator-data/          # generated coordinator state (inbox, history, sync queue)
 ```
-
-Removed from the active architecture: the old root `control-center`, old `pod-simulator`, nested pod network folder, duplicate pod agents, and relay folder.
 
 ## Run
 
@@ -34,73 +43,152 @@ Open:
 
 ```text
 Command Center (EOC):      http://localhost:9400      <-- START HERE
-POD-01 UI (citizen SOS):   http://localhost:8001
-POD-02 UI:                 http://localhost:8002
-...
-POD-10 UI:                 http://localhost:8010
+POD-01..POD-10 (citizen):  http://localhost:8001 .. http://localhost:8010
+
+Relief-team coordinators:
+  Hospital 1 Command:      http://localhost:8101
+  Hospital 2 Command:      http://localhost:8102
+  Shelter A Camp:          http://localhost:8103
+  Shelter B Camp:          http://localhost:8104
+  Shelter C Camp:          http://localhost:8105
+  Workforce Camp 1:        http://localhost:8106
+  Workforce Camp 2:        http://localhost:8107
+  Fire Coordinator:        http://localhost:8108
+  Flood Coordinator 1:     http://localhost:8109
+
 Cloud API health:          http://localhost:9000/api/health
 Satellite health:          http://localhost:9100/health
 CELLTOWER-1 health:        http://localhost:9201/health
 CELLTOWER-2 health:        http://localhost:9202/health
-Simulation controller UI:  http://localhost:9300
-Simulation controller API: http://localhost:9300/api/infra/status
+Simulation controller UI:  http://localhost:9300      (network drills + sensor spikes)
+Sensor simulator API:      http://localhost:9500/status
 ```
 
 ## Active Services
 
 ```text
-command-center         EOC dashboard aggregating the whole network (port 9400)
-cloud-api              backend API storing SOS requests in MongoDB (port 9000)
-mongodb                persistent database for the cloud API
-satellite              satellite middleman forwarding to cloud-api
-celltower-1            cellular middleman forwarding to cloud-api
-celltower-2            cellular middleman forwarding to cloud-api
-simulation-controller  stops/starts satellite and cell tower Docker containers
-pod-01..pod-10         local pod SOS app, routing engine, queue, and mesh relay
+command-center           EOC dashboard aggregating the whole network (port 9400)
+cloud-api                backend API: MongoDB storage, keyword routing, delivery
+                         receipts, resolution tracking, signed alerts (port 9000)
+mongodb                  persistent database for the cloud API
+satellite                satellite middleman forwarding to cloud-api
+celltower-1 / -2         cellular middlemen forwarding to cloud-api
+simulation-controller    fails/restores satellite + towers, drives sensor spikes
+sensor-simulator         Meraki MT fleet posting readings to pods every 4s (port 9500)
+pod-01..pod-10           local pod SOS app, triage, routing engine, queue, mesh relay
+*-coordinator (x9)       relief-team dashboards: role inbox, dispatch board,
+                         request lifecycle, resource fields, own sync ladder
 ```
 
 ## Command Center (EOC dashboard) — http://localhost:9400
 
-A single operator dashboard built to match the design mockups in `images/`.
-It is a plain HTML/CSS/vanilla-JS app (no build step) served by a small Node
-frontend aggregator in `Command-Center/Frontend`. The cloud backend lives beside
-it in `Command-Center/Backend`, persists cloud state to the `mongodb` container,
-and pushes realtime socket events to the frontend. The UI still keeps a 5-second
-polling fallback. Five hash-linked pages:
+A single operator console (React/Vite, served by a Node aggregator in
+`Command-Center/Frontend`). The cloud backend lives beside it in
+`Command-Center/Backend`, persists to the `mongodb` container, and pushes
+realtime socket events to the browser (with a polling fallback). Pages:
 
-- **Dashboard** — KPI cards (active/critical requests, pods online, current
-  mode), live emergency requests, pod network status, early-warning + activity
-  feeds. All real, from the cluster.
-- **Requests** — the full triaged citizen-SOS list from the cloud-api.
-- **Network** — live topology, the QoS class table, a live pod-route table,
-  and **simulation controls that really fail/restore the satellite and cell
-  tower containers** (proxied to the simulation-controller). Fail a link and
-  watch the pod table reroute.
-- **Resources** — relief-operations view (resources, volunteers, forecasts).
-  Clearly labelled `representative data` — pod-level resource tracking is a
-  planned feature (see `essentials/COMMUNICATION-PLAN.md`, Phase 4).
-- **Alerts** — signed-alert broadcast box (Ed25519 via the cloud) and the
-  Shield security-event log.
+- **Dashboard** — KPI tiles (open/critical requests, pods online, current
+  mode), live emergency requests (open cases only), pod network status,
+  early-warning sensor feed, zone map, and the full activity feed. All real,
+  from the cluster.
+- **Requests** — the operator workbench, split into **Active** and
+  **Past history**. Every card shows the triage severity pill *and* the
+  lifecycle pill (`In Progress -> Assigned -> Acknowledged -> Resolved`),
+  the routing logic, and one receipt chip per targeted coordinator
+  (`delivered / queued / rejected / resolved` with the transport it used).
+  When a field team marks a request handled, the card turns green and moves
+  to Past history automatically.
+- **Network** — live topology, QoS table, pod-route table, and **simulation
+  controls that really fail/restore the satellite and cell tower containers**.
+  Fail a link and watch the pod table reroute.
+- **Resources / Volunteers** — relief-operations view (representative data).
+- **Alerts** — a real notification center: the bell badge counts only what
+  arrived since the operator last opened this page (persisted per browser),
+  plus the signed-alert broadcast box (Ed25519) and the Shield security log.
 
-The two audiences are cleanly separated: **citizens** use the pod SOS pages
-(8001-8010); **the EOC operator** uses the command center (9400).
+The three audiences are cleanly separated: **citizens** use the pod SOS pages
+(8001-8010), **relief teams** use the coordinator dashboards (8101-8109), and
+**the EOC operator** uses the command center (9400).
+
+## Relief Coordinator Network — ports 8101-8109
+
+Nine coordinator containers share one codebase (`coordinators/`); a role
+template (hospital / shelter / workforce / fire / flood) shapes each dashboard:
+role-specific resource fields, dispatch board, and keyword matching. Each
+coordinator is a field office with an unreliable uplink — it runs the same
+satellite -> cellular -> mesh -> island ladder as the pods and works fully
+offline.
+
+Key mechanics:
+
+- **Two delivery paths into every inbox.** The cloud routes classified
+  requests down to matching coordinators, AND pods push directly to
+  coordinators pre-registered in their radio (URWB) range — so the local
+  flood team hears a drowning SOS even when every uplink is destroyed.
+  Duplicates merge by request ID; `seenVia` records both paths as proof of
+  redundancy; the first arrival's timestamp always wins. Cards show
+  `received 12:04 pm (sent 09:28 am)` when a request waited in an offline
+  queue — the delay is visible and honest.
+- **Request lifecycle.** Operators **Acknowledge** (team is on it) or
+  **Mark handled** (archives to the coordinator's Past history tab). Both
+  actions sync back to the cloud as resolution events — the Command Center
+  flips the delivery receipt, updates the request card, and archives it.
+  Resolving works offline too; the receipt syncs when a link returns.
+- **Resource shortage loop.** A numeric resource at zero is `out-of-stock`
+  (at <=10% of max: `low-stock`). The dashboard flags it, a shortage event
+  syncs to the cloud, and the Command Center **routes new same-role requests
+  to another coordinator that still has capacity** (falling back to the
+  flagged one only if every coordinator of that role is out). Restocking
+  sends a recovery notice.
+- **Honest receipts.** `delivered` means the coordinator's server confirmed
+  storage over HTTP. If a coordinator answers "not my role", the delivery is
+  marked `rejected` (never fake-delivered, never retried). `resolved` only
+  ever comes from a human clicking Mark handled.
+
+## Sensor Layer — simulated Cisco Meraki fleet
+
+`sensor-simulator/` plays the role of Meraki hardware: **MT10** temperature,
+**MT12** water level, **MT14** air quality/PM2.5, a third-party accelerometer
+feeding through a Catalyst IOx edge app, and **MT30** smart buttons. It posts
+readings to each pod's `/api/sensors` every 4 seconds; spike/reset per sensor
+from the simulation controller UI or `POST http://localhost:9500/spike/POD-06/air_quality`.
+
+When a reading crosses a hazard-pack threshold (flood 150cm, heatwave 45C,
+earthquake 0.4g, wildfire smoke 250ug/m3 — or a fast trend rise), the pod:
+
+1. stores a **local warning** for citizens at that pod (works with zero network),
+2. queues an **EARLY-WARNING** event up the ladder — the cloud answers with a
+   **signed broadcast to every pod**,
+3. pushes the alert **directly to responder coordinators in radio range**, and
+   the cloud also delivers it to the hazard's declared responder roles
+   (flood -> flood+shelter, wildfire -> fire+workforce, earthquake ->
+   hospital+workforce, heatwave -> hospital+shelter) — no keyword luck needed.
+
+The **MT30 button** is different: a physical press is an unambiguous call for
+help, so it skips thresholds and enters the normal SOS pipeline at severity 9.
+
+Citizen SOS triage happens at the pod (`pod-agent/services/triageService.js`):
+critical keywords (breathing/oxygen/suffocation, bleeding, trapped, drowning,
+...in 12 languages) -> severity 9 CRITICAL; essential-need keywords (food,
+water, medicine, shelter) -> 6 HIGH; otherwise 3 LOW.
 
 ## 10-Pod Topology
 
 ```text
-POD-01: CELLTOWER-1, neighbors POD-02
-POD-02: CELLTOWER-1, neighbors POD-01/POD-03
-POD-03: CELLTOWER-1, neighbors POD-02
-POD-04: no cell tower, neighbors POD-05
-POD-05: CELLTOWER-1, neighbors POD-04
-POD-06: no cell tower, no mesh neighbors
-POD-07: CELLTOWER-2, neighbors POD-09
-POD-08: CELLTOWER-2, no mesh neighbors
-POD-09: no cell tower, neighbors POD-10
-POD-10: no cell tower, neighbors POD-09
+                    cell tower    mesh neighbors      coordinators in radio range
+POD-01 District     CELLTOWER-1   POD-02              Shelter A
+POD-02 Hospital     CELLTOWER-1   POD-01, POD-03      Hospital 1
+POD-03 School       CELLTOWER-1   POD-02              (none - cloud only)
+POD-04 Riverbank    none          POD-05              Hospital 2, Shelter A
+POD-05 Evacuation   CELLTOWER-1   POD-04              Shelter A, Fire Dept
+POD-06 RemoteVill   none          none                Hospital 1, Shelter B, Flood
+POD-07 Warehouse    CELLTOWER-2   POD-09              Hospital 2, Workforce 1
+POD-08 MedicalCamp  CELLTOWER-2   none                Shelter C
+POD-09 HighGround   none          POD-10, POD-07      Shelter C, Workforce 2, Flood
+POD-10 MobileRelay  none          POD-09              (none - cloud only)
 ```
 
-CELLTOWER-1 covers POD-01, POD-02, POD-03, and POD-05. CELLTOWER-2 covers POD-07 and POD-08.
+CELLTOWER-1 covers POD-01, POD-02, POD-03, and POD-05. CELLTOWER-2 covers POD-07 and POD-08. POD-06 is deliberately the most isolated node (satellite-only uplink, no mesh neighbors) — but three relief teams sit in its radio range, so it is the best pod for the "uplink destroyed, help still arrives" demo. POD-10 is the mobile relay: the answer to a fully dark zone is driving it to the edge of one.
 
 Every pod has satellite configured. Local pod controls can disable satellite/cellular/mesh for only that pod. Global infrastructure controls fail or restore the shared satellite/celltower services for all pods.
 
@@ -112,6 +200,8 @@ Every citizen SOS is first accepted by that pod's own backend and stored in that
 2. Otherwise, if cellular is enabled locally and a configured tower is up, it is sent to `celltower-* -> cloud-api`.
 3. Otherwise, if mesh is enabled and a surrounding pod has a direct cloud route, it is relayed to that neighbor. The surrounding pod adds it to its own queue and its sync worker forwards it.
 4. Otherwise, the SOS remains cached in the local pod queue until satellite, cellular, or mesh becomes available again.
+
+In parallel with the ladder — and independent of it — the pod immediately pushes the request to any **role-matching coordinator in its radio range** (and every mesh relay pod offers it to its own in-range coordinators too), so nearby relief teams act before the cloud even knows. The cloud copy still follows for the Command Center's picture; the coordinator inbox deduplicates the two arrivals by ID.
 
 The `satellite`, `celltower-*`, and `cloud-api` containers print a compact request snapshot in their logs when they receive an SOS, so the fallback path is visible during demos.
 
@@ -262,6 +352,23 @@ py -3 integrations/integration_test.py
 7. Local-only control: disable cellular on POD-01 and check POD-02; POD-02 remains unaffected.
 8. Global control: fail CELLTOWER-1 and check POD-01, POD-02, POD-03, and POD-05; all see tower 1 down.
 9. UI path test: open any pod UI, use the global and local controls, and watch the route card update.
+10. **Uplink destroyed, help still arrives**: fail satellite and both towers,
+    submit a flood SOS at POD-06 — the Flood coordinator (8109) receives it
+    over the direct mesh within a second while the Command Center stays
+    blind. Restore satellite and watch the Command Center catch up with the
+    honest `received ... (sent ...)` timestamps.
+11. **Closed loop**: submit an SOS, watch it turn `Assigned` at the Command
+    Center, click **Acknowledge** then **Mark handled** on the coordinator —
+    the Command Center card flips to `Acknowledged`, then green `Resolved`,
+    and moves to Past history on both ends.
+12. **Sensor-initiated response**: spike POD-06 `air_quality` from the
+    simulation controller — the pod warns its own citizens, every pod gets a
+    signed broadcast, and the Fire coordinator's inbox gets the wildfire
+    alert. No human sent anything.
+13. **Out-of-stock rerouting**: set Hospital 1's beds to 0, submit a medical
+    SOS from POD-02 — the cloud logs `skipping Hospital1: reported
+    out-of-stock` and delivers to Hospital 2 instead. Restock and routing
+    returns to normal.
 
 ## Stop And Reset
 
@@ -271,9 +378,9 @@ Stop containers:
 docker compose down
 ```
 
-Reset generated queues, pod display names, and local path settings:
+Reset generated queues, pod display names, coordinator inboxes/history, and local path settings:
 
 ```powershell
-Remove-Item -Recurse -Force .\pod-data
+Remove-Item -Recurse -Force .\pod-data, .\coordinator-data
 docker compose up -d --build
 ```

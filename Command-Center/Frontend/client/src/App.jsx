@@ -467,11 +467,25 @@ function Header({ overview, search, setSearch, searchResults, setRoute }) {
       <TopStat tone={mode.key} Icon={mode.Icon} label="Current mode" value={mode.label} />
       <TopStat tone={health.tone} Icon={Gauge} label="Network health" value={health.label} />
 
-      <div className="relative ml-auto w-[min(440px,31vw)] max-[920px]:order-10 max-[920px]:w-full">
+      <div
+        className="relative ml-auto w-[min(440px,31vw)] max-[920px]:order-10 max-[920px]:w-full"
+        onBlur={(event) => {
+          // Close the dropdown when focus leaves the search area entirely.
+          if (!event.currentTarget.contains(event.relatedTarget)) {
+            setSearch("");
+          }
+        }}
+      >
         <Search className="pointer-events-none absolute right-4 top-[11px] text-[#58708d]" size={22} />
         <input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              setSearch("");
+              event.currentTarget.blur();
+            }
+          }}
           placeholder="Search pods, requests, locations..."
           className="h-11 w-full rounded-[11px] border border-[#d8e2ef] bg-white px-[18px] pr-12 text-sm text-[#334155] outline-none"
         />
@@ -482,7 +496,11 @@ function Header({ overview, search, setSearch, searchResults, setRoute }) {
                 <button
                   className="grid w-full grid-cols-[78px_1fr] gap-x-2.5 gap-y-1 rounded-lg p-2.5 text-left hover:bg-[#f3f7fd]"
                   key={`${item.type}-${item.id}`}
-                  onClick={() => setRoute(item.route)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setRoute(item.route);
+                    setSearch("");
+                  }}
                 >
                   <span className="row-span-2 text-xs font-extrabold uppercase text-brand-blue">{item.type}</span>
                   <b className="font-semibold">{item.title}</b>
@@ -498,9 +516,9 @@ function Header({ overview, search, setSearch, searchResults, setRoute }) {
 
       <button className="relative grid h-[42px] w-[42px] shrink-0 place-items-center rounded-full bg-white text-[#52677f]" aria-label="Alerts" onClick={() => setRoute("/alerts")}>
         <Bell size={23} />
-        {(overview?.counts?.alerts || overview?.counts?.critical || 0) > 0 && (
+        {(overview?.counts?.alerts || 0) > 0 && (
           <span className="absolute right-px top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-brand-red px-1 text-[10px] font-black text-white">
-            {overview?.counts?.alerts || overview?.counts?.critical}
+            {overview?.counts?.alerts}
           </span>
         )}
       </button>
@@ -1797,6 +1815,19 @@ function App() {
   const [unseenRequestLogs, setUnseenRequestLogs] = useState([]);
   const [focusedRequestId, setFocusedRequestId] = useState("");
   const [search, setSearch] = useState("");
+  const [alertsSeenAt, setAlertsSeenAt] = useState(() =>
+    Number(localStorage.getItem("sanjeevani-alerts-seen-at") || 0)
+  );
+
+  // Opening the Alerts page marks everything currently there as seen — the
+  // bell badge only counts what arrived AFTER the last visit, like any real
+  // notification center. Persisted so a refresh doesn't resurrect old counts.
+  useEffect(() => {
+    if (route !== "/alerts") return;
+    const now = Date.now();
+    setAlertsSeenAt(now);
+    localStorage.setItem("sanjeevani-alerts-seen-at", String(now));
+  }, [route, unseenRequestLogs.length, overview?.alerts?.length]);
 
   useEffect(() => {
     let mounted = true;
@@ -1890,10 +1921,16 @@ function App() {
         queuedCoordinatorDeliveries: deliveries.filter(
           (delivery) => !["delivered", "resolved", "rejected"].includes(delivery.status)
         ).length,
-        alerts: (base.counts.alerts || 0) + unseenRequestLogs.length
+        alerts:
+          unseenRequestLogs.filter(
+            (entry) => new Date(entry.receivedAt || 0).getTime() > alertsSeenAt
+          ).length +
+          (base.alerts || []).filter(
+            (alert) => new Date(alert.issuedAt || 0).getTime() > alertsSeenAt
+          ).length
       }
     };
-  }, [overview, requests, deliveries, unseenRequestLogs]);
+  }, [overview, requests, deliveries, unseenRequestLogs, alertsSeenAt]);
 
   const displayRequests = requests.length ? requests : fallbackRequests();
   const searchResults = useMemo(() => {
