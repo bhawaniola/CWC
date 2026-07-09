@@ -39,16 +39,35 @@ function nowIso() {
 // a flood alert fire.
 // Names/ids/urls below are pulled straight from your real docker-compose.yml
 // (POD_NAME per service), not placeholders.
+// Some sites carry more than one sensor, exactly like a real deployment where
+// a single Meraki MR/MV gateway backhauls several MT sensors at once. Each row
+// below is one physical sensor; the pod side keys readings by sensor name and
+// the simulator state/spike/reset are keyed by podId:sensor, so two sensors on
+// the same pod stay independent and each renders as its own live card.
+// Multi-sensor pods are paired where two hazards genuinely co-locate:
+//   POD-04 Riverbank Village - a river valley below hills: flood AND quake.
+//   POD-05 Evacuation Route  - the route can be cut by flood OR by a quake.
+//   POD-09 High Ground Shelter - too high to flood, but a crowded indoor
+//                                shelter still needs heat monitoring + quake.
+//   POD-06 Remote Village - forest-adjacent: heat AND wildfire smoke (MT14).
+//   POD-08 Medical Camp   - patients are smoke-vulnerable: heat AND MT14 air.
+// air_quality is a genuine Meraki MT14 metric (PM2.5 ug/m3), so unlike the
+// seismic accelerometer it needs no "not really Cisco" caveat.
 const STATIONS = [
   { podId: "POD-01", podName: "District Command Pod", url: "http://pod-01:8000", sensor: "temperature", unit: "celsius", model: "MT10", base: 29, drift: 0.6, min: 22, max: 50 },
   { podId: "POD-02", podName: "Hospital Relief Pod", url: "http://pod-02:8000", sensor: "temperature", unit: "celsius", model: "MT10", base: 30, drift: 0.6, min: 22, max: 50 },
   { podId: "POD-03", podName: "School Shelter Pod", url: "http://pod-03:8000", sensor: "shake_g", unit: "g", model: "3rd-party accelerometer (Catalyst IOx)", base: 0.02, drift: 0.01, min: 0, max: 0.6 },
   { podId: "POD-04", podName: "Riverbank Village Pod", url: "http://pod-04:8000", sensor: "water_level", unit: "cm", model: "MT12", base: 70, drift: 3, min: 35, max: 200 },
+  { podId: "POD-04", podName: "Riverbank Village Pod", url: "http://pod-04:8000", sensor: "shake_g", unit: "g", model: "3rd-party accelerometer (Catalyst IOx)", base: 0.02, drift: 0.01, min: 0, max: 0.6 },
   { podId: "POD-05", podName: "Evacuation Route Pod", url: "http://pod-05:8000", sensor: "water_level", unit: "cm", model: "MT12", base: 58, drift: 2, min: 35, max: 200 },
+  { podId: "POD-05", podName: "Evacuation Route Pod", url: "http://pod-05:8000", sensor: "shake_g", unit: "g", model: "3rd-party accelerometer (Catalyst IOx)", base: 0.02, drift: 0.01, min: 0, max: 0.6 },
   { podId: "POD-06", podName: "Remote Village Pod", url: "http://pod-06:8000", sensor: "temperature", unit: "celsius", model: "MT10", base: 31, drift: 0.7, min: 22, max: 50 },
+  { podId: "POD-06", podName: "Remote Village Pod", url: "http://pod-06:8000", sensor: "air_quality", unit: "ugm3", model: "MT14", base: 18, drift: 4, min: 5, max: 500 },
   { podId: "POD-07", podName: "Supply Warehouse Pod", url: "http://pod-07:8000", sensor: "temperature", unit: "celsius", model: "MT10", base: 28, drift: 0.5, min: 22, max: 50 },
   { podId: "POD-08", podName: "Medical Camp Pod", url: "http://pod-08:8000", sensor: "temperature", unit: "celsius", model: "MT10", base: 30, drift: 0.6, min: 22, max: 50 },
+  { podId: "POD-08", podName: "Medical Camp Pod", url: "http://pod-08:8000", sensor: "air_quality", unit: "ugm3", model: "MT14", base: 16, drift: 4, min: 5, max: 500 },
   { podId: "POD-09", podName: "High Ground Shelter Pod", url: "http://pod-09:8000", sensor: "shake_g", unit: "g", model: "3rd-party accelerometer (Catalyst IOx)", base: 0.02, drift: 0.01, min: 0, max: 0.6 },
+  { podId: "POD-09", podName: "High Ground Shelter Pod", url: "http://pod-09:8000", sensor: "temperature", unit: "celsius", model: "MT10", base: 31, drift: 0.6, min: 22, max: 50 },
   { podId: "POD-10", podName: "Mobile Relay Pod", url: "http://pod-10:8000", sensor: "water_level", unit: "cm", model: "MT12", base: 55, drift: 2, min: 35, max: 200 }
 ];
 

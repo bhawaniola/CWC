@@ -430,6 +430,7 @@ button {
 .request-card,
 .location-card,
 .network-details-card,
+.pod-sensor-card,
 .pod-status-card,
 .trust-footer,
 .selection-panel {
@@ -1566,4 +1567,310 @@ textarea {
   .map-dialog-header {
     align-items: flex-start;
   }
+}
+
+/* ---- Local Situational Awareness (pod sensor + hazard panel) ---- */
+.pod-sensor-card {
+  position: relative;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.pod-sensor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pod-sensor-pill {
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.pod-sensor-pill.clear {
+  color: #067459;
+  background: #dff8ee;
+}
+
+.pod-sensor-pill.watch {
+  color: #8a5314;
+  background: #fff2da;
+  box-shadow: 0 0 0 4px rgba(240, 165, 42, 0.14);
+}
+
+.pod-sensor-pill.alert {
+  color: #ffffff;
+  background: #d9432f;
+  box-shadow: 0 0 0 4px rgba(217, 67, 47, 0.14);
+  animation: livePulse 1.6s ease-in-out infinite;
+}
+
+.pod-alert-guidance {
+  font-weight: 700 !important;
+  opacity: 0.92;
+}
+
+.pod-watch-banner {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 11px;
+  align-items: center;
+  margin-top: 13px;
+  padding: 11px 13px;
+  border-radius: 10px;
+  color: #8a5314;
+  background: #fff6e6;
+  border: 1px solid #f3d097;
+}
+
+.pod-watch-banner svg {
+  width: 19px;
+  height: 19px;
+  stroke-width: 2.4;
+}
+
+.pod-watch-banner p {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.pod-sensor-title {
+  margin: 6px 0 0;
+  color: #0d284e;
+  font-size: 22px;
+  line-height: 1.08;
+}
+
+.pod-sensor-lede {
+  margin: 11px 0 0;
+  color: #5a6b82;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.pod-alert-banner {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  gap: 12px;
+  margin-top: 13px;
+  padding: 13px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.pod-alert-banner svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.4;
+}
+
+.pod-alert-banner strong {
+  display: block;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+
+.pod-alert-banner p {
+  margin: 3px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+.pod-alert-banner small {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0.75;
+}
+
+.pod-alert-banner.sev-high {
+  color: #8f2318;
+  background: #ffe7e2;
+  border-color: #f6b6ac;
+}
+
+.pod-alert-banner.sev-mid {
+  color: #8a5314;
+  background: #fff2da;
+  border-color: #f3d097;
+}
+
+.pod-alert-banner.sev-low {
+  color: #1c4f86;
+  background: #e4f0ff;
+  border-color: #b6d4f6;
+}
+
+.pod-sensor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 13px;
+}
+
+.pod-sensor-tile {
+  position: relative;
+  padding: 12px;
+  border: 1px solid #e1eaf3;
+  border-radius: 10px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.pod-sensor-tile::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: #cbd6e4;
+}
+
+.pod-sensor-tile.normal::before {
+  background: #12b886;
+}
+
+.pod-sensor-tile.warning::before {
+  background: #f0a52a;
+}
+
+.pod-sensor-tile.critical::before {
+  background: #e03e2d;
+}
+
+.pod-sensor-tile-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pod-sensor-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  color: #1a5fb4;
+  background: #e8f1fe;
+}
+
+.pod-sensor-icon svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2.2;
+}
+
+.pod-sensor-status {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #4a5a70;
+  background: #eef3f8;
+}
+
+.pod-sensor-status.normal {
+  color: #067459;
+  background: #dff8ee;
+}
+
+.pod-sensor-status.warning {
+  color: #8a5314;
+  background: #fff2da;
+}
+
+.pod-sensor-status.critical {
+  color: #ffffff;
+  background: #d9432f;
+}
+
+.pod-sensor-value {
+  margin-top: 10px;
+  color: #10294c;
+  font-size: 27px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.pod-sensor-value span {
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #63738b;
+}
+
+.pod-sensor-meta {
+  margin-top: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #63738b;
+}
+
+.pod-sensor-meta strong {
+  color: #35507a;
+}
+
+.pod-sensor-meter {
+  margin-top: 9px;
+  height: 6px;
+  border-radius: 999px;
+  background: #eef2f7;
+  overflow: hidden;
+}
+
+.pod-sensor-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #12b886;
+  transition: width 0.5s ease;
+}
+
+.pod-sensor-tile.warning .pod-sensor-meter span {
+  background: #f0a52a;
+}
+
+.pod-sensor-tile.critical .pod-sensor-meter span {
+  background: #e03e2d;
+}
+
+.pod-sensor-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #7a8aa0;
+}
+
+.pod-sensor-source {
+  display: block;
+  margin-top: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #9aa8bc;
+}
+
+.pod-sensor-empty {
+  margin: 13px 0 0;
+  padding: 14px;
+  border: 1px dashed #cdd9e6;
+  border-radius: 10px;
+  color: #63738b;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  background: rgba(240, 245, 250, 0.6);
 }

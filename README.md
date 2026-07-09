@@ -143,40 +143,45 @@ View cloud-received requests:
 curl.exe http://localhost:9000/api/requests
 ```
 
+Infra fail/restore endpoints require an `x-infra-token` header (`INFRA_CONTROL_KEY`,
+default `sanjeevani-infra-demo-key`) so a stray request can't kill the demo
+mid-presentation. The Command Center UI and the simulation-controller's own
+UI already send it; add it yourself for direct curl calls:
+
 Fail satellite globally through the simulation controller:
 
 ```powershell
-curl.exe -X POST http://localhost:9300/api/infra/satellite/fail -H "Content-Type: application/json" -d "{}"
+curl.exe -X POST http://localhost:9300/api/infra/satellite/fail -H "Content-Type: application/json" -H "x-infra-token: sanjeevani-infra-demo-key" -d "{}"
 ```
 
 Restore satellite globally through the simulation controller:
 
 ```powershell
-curl.exe -X POST http://localhost:9300/api/infra/satellite/restore -H "Content-Type: application/json" -d "{}"
+curl.exe -X POST http://localhost:9300/api/infra/satellite/restore -H "Content-Type: application/json" -H "x-infra-token: sanjeevani-infra-demo-key" -d "{}"
 ```
 
 Fail CELLTOWER-1 globally through the simulation controller:
 
 ```powershell
-curl.exe -X POST http://localhost:9300/api/infra/celltower-1/fail -H "Content-Type: application/json" -d "{}"
+curl.exe -X POST http://localhost:9300/api/infra/celltower-1/fail -H "Content-Type: application/json" -H "x-infra-token: sanjeevani-infra-demo-key" -d "{}"
 ```
 
 Restore CELLTOWER-1 globally through the simulation controller:
 
 ```powershell
-curl.exe -X POST http://localhost:9300/api/infra/celltower-1/restore -H "Content-Type: application/json" -d "{}"
+curl.exe -X POST http://localhost:9300/api/infra/celltower-1/restore -H "Content-Type: application/json" -H "x-infra-token: sanjeevani-infra-demo-key" -d "{}"
 ```
 
 Fail CELLTOWER-2 globally through the simulation controller:
 
 ```powershell
-curl.exe -X POST http://localhost:9300/api/infra/celltower-2/fail -H "Content-Type: application/json" -d "{}"
+curl.exe -X POST http://localhost:9300/api/infra/celltower-2/fail -H "Content-Type: application/json" -H "x-infra-token: sanjeevani-infra-demo-key" -d "{}"
 ```
 
 Restore CELLTOWER-2 globally through the simulation controller:
 
 ```powershell
-curl.exe -X POST http://localhost:9300/api/infra/celltower-2/restore -H "Content-Type: application/json" -d "{}"
+curl.exe -X POST http://localhost:9300/api/infra/celltower-2/restore -H "Content-Type: application/json" -H "x-infra-token: sanjeevani-infra-demo-key" -d "{}"
 ```
 
 Disable satellite only on POD-01:

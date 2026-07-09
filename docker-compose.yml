@@ -87,6 +87,8 @@ services:
       CELLTOWER_1_CONTAINER: sanjeevani-celltower-1
       CELLTOWER_2_CONTAINER: sanjeevani-celltower-2
       DOCKER_SOCKET: /var/run/docker.sock
+      SENSOR_SIMULATOR_URL: http://sensor-simulator:9400
+      INFRA_CONTROL_KEY: sanjeevani-infra-demo-key
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
@@ -105,6 +107,7 @@ services:
       CLOUD_URL: http://cloud-api:9000
       CLOUD_SOCKET_URL: http://cloud-api:9000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
+      INFRA_CONTROL_KEY: sanjeevani-infra-demo-key
       POD_URLS: "POD-01=http://pod-01:8000,POD-02=http://pod-02:8000,POD-03=http://pod-03:8000,POD-04=http://pod-04:8000,POD-05=http://pod-05:8000,POD-06=http://pod-06:8000,POD-07=http://pod-07:8000,POD-08=http://pod-08:8000,POD-09=http://pod-09:8000,POD-10=http://pod-10:8000"
     networks:
       - sanjeevani-net
@@ -294,7 +297,7 @@ services:
       SATELLITE_URL: http://satellite:9100
       CELL_TOWERS: ""
       CONNECTED_TOWERS: ""
-      NEIGHBORS: http://pod-10:8000
+      NEIGHBORS: http://pod-10:8000, http://pod-07:8000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
       COORDINATOR_INBOXES: shelter=http://shelter-c-coordinator:8000;workforce=http://workforce-2-coordinator:8000;flood=http://flood-coordinator-1:8000
     volumes:
@@ -321,8 +324,6 @@ services:
       - ./pod-data/pod-10:/app/data
     networks:
       - sanjeevani-net
-
-
 
   hospital-1-coordinator:
     build: ./coordinators

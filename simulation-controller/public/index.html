@@ -4,30 +4,60 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>SANJEEVANI Simulation Controller</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // Shared brand config - copy this block into any other SANJEEVANI
+      // frontend (Command-Center, pod-agent, coordinators) to keep the same
+      // look everywhere without a build step.
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ["Inter", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "sans-serif"]
+            },
+            colors: {
+              brand: {
+                ink: "#0b2545",
+                muted: "#607086",
+                line: "#d6e1ea",
+                soft: "#f5f8fb"
+              }
+            },
+            boxShadow: {
+              soft: "0 10px 24px rgba(25, 45, 74, 0.08)",
+              card: "0 18px 42px rgba(25, 45, 74, 0.10)"
+            }
+          }
+        }
+      };
+    </script>
     <link rel="stylesheet" href="/style.css">
   </head>
-  <body>
-    <header class="topbar">
-      <div class="brand-block">
-        <div class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" role="img">
+  <body class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-emerald-50 font-sans text-brand-ink antialiased">
+    <header class="sticky top-0 z-30 flex flex-col gap-4 border-b border-brand-line bg-white/90 px-4 py-4 shadow-soft backdrop-blur-md sm:flex-row sm:items-center sm:justify-between sm:px-8 sm:py-5">
+      <div class="flex items-center gap-3">
+        <div class="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-blue-100 bg-gradient-to-b from-white to-blue-50 text-blue-600 shadow-soft sm:h-14 sm:w-14">
+          <svg viewBox="0 0 24 24" class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 3.25 4.75 7.2v8.15L12 20.75l7.25-5.4V7.2L12 3.25Z"></path>
             <path d="M8.5 12.2h7M12 8.7v7"></path>
           </svg>
         </div>
-        <div>
-          <p class="eyebrow">SANJEEVANI controller</p>
-          <h1>Simulation Command Center</h1>
-          <p class="subtitle">Control satellite and cellular Docker containers, then watch the 10-pod mesh reroute SOS traffic.</p>
+        <div class="min-w-0">
+          <p class="text-[11px] font-extrabold uppercase tracking-wide text-emerald-600">Sanjeevani &middot; Network Simulation Controller</p>
+          <h1 class="text-2xl font-extrabold leading-tight text-brand-ink sm:text-3xl">Network Drill Controller</h1>
+          <p class="mt-0.5 max-w-xl text-sm leading-snug text-brand-muted sm:block">Fail and restore satellite and cellular links, then watch the pod mesh reroute SOS traffic in real time.</p>
         </div>
       </div>
-      <div class="topbar-actions">
-        <div class="status-summary">
-          <span>Network mode</span>
-          <strong id="infraSummary">Checking links</strong>
+      <div class="flex items-center gap-3">
+        <div class="min-w-[160px] rounded-lg border border-brand-line bg-white px-3 py-2 shadow-soft">
+          <span class="block text-[10px] font-extrabold uppercase tracking-wide text-brand-muted">Network mode</span>
+          <strong id="infraSummary" class="mt-1 block text-sm font-bold text-amber-600">Checking links</strong>
         </div>
-        <button id="refresh" class="icon-button" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
+        <button id="refresh" type="button" class="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border border-brand-line bg-white px-4 text-sm font-bold text-blue-700 shadow-soft transition hover:-translate-y-0.5 hover:border-blue-300 disabled:cursor-wait disabled:opacity-60">
+          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M20 11a8.1 8.1 0 0 0-14.3-5M4 5v5h5"></path>
             <path d="M4 13a8.1 8.1 0 0 0 14.3 5M20 19v-5h-5"></path>
           </svg>
@@ -36,171 +66,170 @@
       </div>
     </header>
 
-    <main class="shell">
-      <section class="hero-panel">
-        <div>
-          <p class="eyebrow">Live drill board</p>
-          <h2>Fail infrastructure, prove resilient routing.</h2>
-          <p>Pods always queue SOS locally first. When a direct cloud path is unavailable, the simulator shows how the request moves through satellite, cellular, and pod mesh links.</p>
-        </div>
-        <div class="hero-metrics" aria-label="Simulation highlights">
-          <div>
-            <span>Pods</span>
-            <strong>10</strong>
-          </div>
-          <div>
-            <span>Backhaul links</span>
-            <strong>3</strong>
-          </div>
-          <div>
-            <span>Health poll</span>
-            <strong>5s</strong>
-          </div>
-        </div>
+    <main class="mx-auto max-w-[1400px] px-4 pb-16 pt-6 sm:px-8">
+      <section class="mb-6 rounded-2xl border border-blue-100 bg-gradient-to-br from-white via-white to-blue-50 p-6 shadow-card">
+        <p class="text-[11px] font-extrabold uppercase tracking-wide text-emerald-600">Live drill board</p>
+        <h2 class="mt-2 text-2xl font-extrabold leading-tight text-brand-ink sm:text-3xl">Fail infrastructure, prove resilient routing.</h2>
+        <p class="mt-3 max-w-2xl leading-relaxed text-brand-muted">Pods always queue SOS locally first. When a direct cloud path is unavailable, the simulator shows how the request moves through satellite, cellular, and pod mesh links.</p>
       </section>
 
-      <section class="link-grid" aria-live="polite">
-        <article class="link-card" data-link="satellite">
-          <div class="link-card-top">
-            <div class="link-icon satellite-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
+      <section class="grid grid-cols-1 gap-4 md:grid-cols-3" aria-live="polite">
+        <article data-link="satellite" class="relative overflow-hidden rounded-2xl border border-brand-line bg-white p-5 shadow-soft">
+          <div data-accent class="absolute inset-x-0 top-0 h-1 bg-slate-300"></div>
+          <div class="flex items-center gap-3">
+            <div class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-600">
+              <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M6.5 9.5 10 6l8 8-3.5 3.5-8-8Z"></path>
                 <path d="m8 11-4 4m9-9 4-4m-3 18a8 8 0 0 0-10-10"></path>
               </svg>
             </div>
-            <div>
-              <span>Satellite link</span>
-              <small>Global NTN backhaul</small>
+            <div class="min-w-0">
+              <span class="block text-sm font-extrabold text-brand-ink">Satellite link</span>
+              <small class="block text-xs text-brand-muted">Global NTN backhaul</small>
             </div>
           </div>
-          <div class="link-state">
-            <strong id="satelliteStatus">-</strong>
-            <small id="satelliteDocker">container: -</small>
+          <div class="mt-5">
+            <strong id="satelliteStatus" class="block text-3xl font-extrabold uppercase leading-none text-slate-400">-</strong>
+            <small id="satelliteDocker" class="mt-2 block break-words text-xs text-brand-muted">container: -</small>
           </div>
-          <div class="actions">
-            <button class="danger-action" type="button" data-link-action="fail" data-link-key="satellite">
-              <span aria-hidden="true"></span>
-              Stop
+          <div class="mt-5 grid grid-cols-2 gap-2">
+            <button type="button" data-link-action="fail" data-link-key="satellite" class="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 text-sm font-bold text-rose-700 transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-60">
+              <span class="h-2 w-2 rounded-full bg-rose-500" aria-hidden="true"></span>Stop
             </button>
-            <button class="safe-action" type="button" data-link-action="restore" data-link-key="satellite">
-              <span aria-hidden="true"></span>
-              Start
+            <button type="button" data-link-action="restore" data-link-key="satellite" class="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-bold text-emerald-700 transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-60">
+              <span class="h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true"></span>Start
             </button>
           </div>
         </article>
 
-        <article class="link-card" data-link="celltower-1">
-          <div class="link-card-top">
-            <div class="link-icon tower-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
+        <article data-link="celltower-1" class="relative overflow-hidden rounded-2xl border border-brand-line bg-white p-5 shadow-soft">
+          <div data-accent class="absolute inset-x-0 top-0 h-1 bg-slate-300"></div>
+          <div class="flex items-center gap-3">
+            <div class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600">
+              <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M12 3v18M7 21h10M8 7a6 6 0 0 1 8 0M5 4a10 10 0 0 1 14 0"></path>
                 <path d="m9 21 3-8 3 8"></path>
               </svg>
             </div>
-            <div>
-              <span>CELLTOWER-1</span>
-              <small>West and central pods</small>
+            <div class="min-w-0">
+              <span class="block text-sm font-extrabold text-brand-ink">CELLTOWER-1</span>
+              <small class="block text-xs text-brand-muted">West and central pods</small>
             </div>
           </div>
-          <div class="link-state">
-            <strong id="celltower1Status">-</strong>
-            <small id="celltower1Docker">container: -</small>
+          <div class="mt-5">
+            <strong id="celltower1Status" class="block text-3xl font-extrabold uppercase leading-none text-slate-400">-</strong>
+            <small id="celltower1Docker" class="mt-2 block break-words text-xs text-brand-muted">container: -</small>
           </div>
-          <div class="actions">
-            <button class="danger-action" type="button" data-link-action="fail" data-link-key="celltower-1">
-              <span aria-hidden="true"></span>
-              Stop
+          <div class="mt-5 grid grid-cols-2 gap-2">
+            <button type="button" data-link-action="fail" data-link-key="celltower-1" class="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 text-sm font-bold text-rose-700 transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-60">
+              <span class="h-2 w-2 rounded-full bg-rose-500" aria-hidden="true"></span>Stop
             </button>
-            <button class="safe-action" type="button" data-link-action="restore" data-link-key="celltower-1">
-              <span aria-hidden="true"></span>
-              Start
+            <button type="button" data-link-action="restore" data-link-key="celltower-1" class="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-bold text-emerald-700 transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-60">
+              <span class="h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true"></span>Start
             </button>
           </div>
         </article>
 
-        <article class="link-card" data-link="celltower-2">
-          <div class="link-card-top">
-            <div class="link-icon tower-icon alt" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
+        <article data-link="celltower-2" class="relative overflow-hidden rounded-2xl border border-brand-line bg-white p-5 shadow-soft">
+          <div data-accent class="absolute inset-x-0 top-0 h-1 bg-slate-300"></div>
+          <div class="flex items-center gap-3">
+            <div class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600">
+              <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M12 3v18M7 21h10M8 7a6 6 0 0 1 8 0M5 4a10 10 0 0 1 14 0"></path>
                 <path d="m9 21 3-8 3 8"></path>
               </svg>
             </div>
-            <div>
-              <span>CELLTOWER-2</span>
-              <small>East and relay-side pods</small>
+            <div class="min-w-0">
+              <span class="block text-sm font-extrabold text-brand-ink">CELLTOWER-2</span>
+              <small class="block text-xs text-brand-muted">East and relay-side pods</small>
             </div>
           </div>
-          <div class="link-state">
-            <strong id="celltower2Status">-</strong>
-            <small id="celltower2Docker">container: -</small>
+          <div class="mt-5">
+            <strong id="celltower2Status" class="block text-3xl font-extrabold uppercase leading-none text-slate-400">-</strong>
+            <small id="celltower2Docker" class="mt-2 block break-words text-xs text-brand-muted">container: -</small>
           </div>
-          <div class="actions">
-            <button class="danger-action" type="button" data-link-action="fail" data-link-key="celltower-2">
-              <span aria-hidden="true"></span>
-              Stop
+          <div class="mt-5 grid grid-cols-2 gap-2">
+            <button type="button" data-link-action="fail" data-link-key="celltower-2" class="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 text-sm font-bold text-rose-700 transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-60">
+              <span class="h-2 w-2 rounded-full bg-rose-500" aria-hidden="true"></span>Stop
             </button>
-            <button class="safe-action" type="button" data-link-action="restore" data-link-key="celltower-2">
-              <span aria-hidden="true"></span>
-              Start
+            <button type="button" data-link-action="restore" data-link-key="celltower-2" class="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-bold text-emerald-700 transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-60">
+              <span class="h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true"></span>Start
             </button>
           </div>
         </article>
       </section>
 
-      <section class="panel sensor-panel">
-        <div class="section-heading">
+      <section class="mt-6 rounded-2xl border border-brand-line bg-white/90 p-6 shadow-soft">
+        <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p class="eyebrow">Live sensor feed</p>
-            <h2>Simulated Meraki sensor readings</h2>
+            <p class="text-[11px] font-extrabold uppercase tracking-wide text-emerald-600">Live event timeline</p>
+            <h2 class="mt-1 text-xl font-extrabold text-brand-ink">What the network is doing right now</h2>
+            <p class="mt-1 max-w-xl text-sm leading-snug text-brand-muted">Every failed link, hazard threshold crossing, and mesh reroute is logged here the moment it happens &mdash; the running story of the drill, not just its current snapshot.</p>
           </div>
-          <p>Each pod's simulated MT-style sensor posts a fresh reading every few seconds. Use Spike to ramp a reading toward its hazard threshold live, right from here.</p>
+          <div class="flex items-center gap-3">
+            <span class="inline-flex items-center gap-2 rounded-full border border-brand-line bg-white px-3 py-1.5 text-xs font-bold text-brand-muted shadow-soft">
+              <span class="relative flex h-2 w-2"><span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span></span>
+              Live &middot; <span id="eventCount" class="tabular-nums">0</span>&nbsp;events
+            </span>
+            <button id="clearEvents" type="button" class="h-9 shrink-0 rounded-lg border border-brand-line bg-white px-3 text-xs font-bold text-brand-ink shadow-soft transition hover:-translate-y-0.5 hover:border-blue-300">Clear</button>
+          </div>
+        </div>
+        <ol id="eventLog" class="flex max-h-[340px] flex-col gap-2 overflow-y-auto pr-1"></ol>
+      </section>
+
+      <section class="mt-6 rounded-2xl border border-brand-line bg-white/90 p-6 shadow-soft">
+        <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p class="text-[11px] font-extrabold uppercase tracking-wide text-emerald-600">Live sensor feed</p>
+            <h2 class="mt-1 text-xl font-extrabold text-brand-ink">Simulated Meraki sensor readings</h2>
+          </div>
+          <p class="max-w-md text-sm leading-relaxed text-brand-muted">Simulated Meraki MT10/MT12/MT14 and Catalyst IOx sensors post fresh readings every few seconds &mdash; some sites carry more than one. Each card shows the hazard it guards (flood, quake, heatwave, wildfire smoke) and how close it sits to threshold. Use Spike to drive one live.</p>
         </div>
 
-        <div id="sensorNotice" class="sensor-notice" role="status" hidden></div>
+        <div id="sensorNotice" class="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700" role="status" hidden></div>
 
-        <div id="sensorGrid" class="sensor-grid" aria-live="polite"></div>
+        <div id="sensorGrid" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" aria-live="polite"></div>
 
-        <article class="topology-card button-panel">
-          <h3>MT30 help buttons</h3>
-          <div id="buttonGrid" class="button-grid"></div>
+        <article class="mt-6 rounded-xl border border-brand-line bg-gradient-to-b from-white to-slate-50 p-5">
+          <h3 class="mb-4 text-base font-bold text-brand-ink">MT30 help buttons</h3>
+          <div id="buttonGrid" class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
         </article>
       </section>
 
-      <section class="panel topology-panel">
-        <div class="section-heading">
+      <section class="mt-6 rounded-2xl border border-brand-line bg-white/90 p-6 shadow-soft">
+        <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p class="eyebrow">10-pod topology</p>
-            <h2>Cell tower coverage and pod mesh links</h2>
+            <p class="text-[11px] font-extrabold uppercase tracking-wide text-emerald-600">10-pod topology</p>
+            <h2 class="mt-1 text-xl font-extrabold text-brand-ink">Cell tower coverage and pod mesh links</h2>
           </div>
-          <p>Every pod has satellite fallback. Cellular and mesh paths below are used when direct links fail.</p>
+          <p class="max-w-md text-sm leading-relaxed text-brand-muted">Every pod has satellite fallback. Cellular and mesh paths below are used when direct links fail.</p>
         </div>
 
-        <div id="topologyStats" class="topology-stats" aria-label="Topology summary"></div>
+        <div id="topologyStats" class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" aria-label="Topology summary"></div>
 
-        <div class="topology-grid">
-          <article class="topology-card">
-            <h3>Cell tower coverage</h3>
-            <div id="towerTopology" class="tower-topology" aria-live="polite"></div>
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <article class="rounded-xl border border-brand-line bg-white/80 p-5 shadow-soft">
+            <h3 class="mb-4 text-base font-bold text-brand-ink">Cell tower coverage</h3>
+            <div id="towerTopology" class="grid gap-3" aria-live="polite"></div>
           </article>
 
-          <article class="topology-card">
-            <h3>Pod mesh interconnections</h3>
-            <div id="meshTopology" class="mesh-topology"></div>
+          <article class="rounded-xl border border-brand-line bg-white/80 p-5 shadow-soft">
+            <h3 class="mb-4 text-base font-bold text-brand-ink">Pod mesh interconnections</h3>
+            <div id="meshTopology"></div>
           </article>
         </div>
 
-        <article class="topology-card pod-connection-card">
-          <h3>Per-pod cell tower and neighbor map</h3>
-          <div id="podConnectionMap" class="pod-connection-map"></div>
+        <article class="mt-4 rounded-xl border border-brand-line bg-white/80 p-5 shadow-soft">
+          <h3 class="mb-4 text-base font-bold text-brand-ink">Per-pod cell tower and neighbor map</h3>
+          <div id="podConnectionMap" class="grid grid-cols-1 gap-3 lg:grid-cols-2"></div>
         </article>
       </section>
 
-      
-
-      <div class="notice-row">
-        <div id="notice" class="notice" role="status"></div>
-        <div class="last-updated">Last checked: <strong id="lastUpdated">-</strong></div>
+      <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div id="notice" class="min-h-[46px] flex-1 rounded-lg border border-brand-line bg-white px-4 py-3 text-sm font-semibold text-brand-muted shadow-soft" role="status"></div>
+        <div class="flex h-[46px] shrink-0 items-center whitespace-nowrap rounded-lg border border-brand-line bg-white px-4 text-sm text-brand-muted shadow-soft">
+          Last checked:&nbsp;<strong id="lastUpdated" class="text-brand-ink">-</strong>
+        </div>
       </div>
     </main>
 

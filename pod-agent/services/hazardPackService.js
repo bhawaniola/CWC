@@ -32,6 +32,20 @@ const HAZARD_PACKS = [
     severity: 7,
     alert:
       "HEATWAVE advisory at {site}: {value} C. Cooling center open. Check on elderly neighbours."
+  },
+  {
+    // Meraki MT14 reports indoor air quality / PM2.5 (ug/m3). Wildfire smoke
+    // pushes PM2.5 well past the "hazardous" AQI band (~250), and a fast rise
+    // catches an approaching smoke plume before it maxes out. This is a real
+    // MT14 metric, so no "seismic MT" style disclaimer is needed here.
+    name: "wildfire",
+    sensor: "air_quality",
+    threshold: 250,
+    trendWindow: 5,
+    trendMinRise: 120,
+    severity: 8,
+    alert:
+      "WILDFIRE SMOKE alert at {site}: air quality {value} ug/m3 PM2.5 (hazardous). Close windows, mask up, and move indoors or evacuate on volunteer advice."
   }
 ];
 

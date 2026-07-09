@@ -8,6 +8,16 @@ export async function fetchPodStatus(signal) {
   return response.json();
 }
 
+export async function fetchPodHazards(signal) {
+  const response = await fetch("/api/hazards", { signal });
+
+  if (!response.ok) {
+    throw new Error("Unable to load pod hazard telemetry.");
+  }
+
+  return response.json();
+}
+
 export async function updateNetworkPath(pathName, enabled) {
   const action = enabled ? "enable" : "disable";
   const response = await fetch(`/api/network/${pathName}/${action}`, {

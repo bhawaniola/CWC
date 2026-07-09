@@ -403,72 +403,78 @@ function StatusPill({ request }) {
   return <span className={`pill ${label.toLowerCase()}`}>{label.toUpperCase()}</span>;
 }
 
+const TOP_ICON_TONE = {
+  satellite: "text-brand-teal bg-[#eef9f7]",
+  cellular: "text-brand-teal bg-[#eef9f7]",
+  ok: "text-brand-teal bg-[#eef9f7]",
+  island: "text-brand-orange bg-[#fff4ec]",
+  warn: "text-brand-orange bg-[#fff4ec]",
+  danger: "text-brand-red bg-[#fff1f3]"
+};
+
+function TopStat({ tone, Icon, label, value }) {
+  return (
+    <div className="flex min-w-[158px] items-center gap-2.5 border-r border-brand-line pr-[22px] max-[920px]:border-r-0">
+      <span className={`grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[13px] ${TOP_ICON_TONE[tone] || TOP_ICON_TONE.ok}`}>
+        <Icon size={21} strokeWidth={2.2} />
+      </span>
+      <div>
+        <small className="block text-[11px] font-bold uppercase leading-tight text-[#5d6d86]">{label}</small>
+        <b className="mt-0.5 block text-[17px] font-extrabold uppercase leading-tight">{value}</b>
+      </div>
+    </div>
+  );
+}
+
 function Header({ overview, search, setSearch, searchResults, setRoute }) {
   const mode = deriveMode(overview?.infra);
   const health = deriveNetworkHealth(overview, mode);
-  const ModeIcon = mode.Icon;
 
   return (
-    <header className="topbar">
-      <div className="top-stat">
-        <span className="top-icon dotted"><Activity size={24} /></span>
-        <div>
-          <small>PODS ONLINE</small>
-          <b>{overview?.counts?.podsOnline || 0} / {overview?.counts?.podsTotal || 0}</b>
-        </div>
-      </div>
-      <div className="top-stat">
-        <span className={`top-icon ${mode.key}`}>
-          <ModeIcon size={24} />
-        </span>
-        <div>
-          <small>CURRENT MODE</small>
-          <b>{mode.label}</b>
-        </div>
-      </div>
-      <div className="top-stat">
-        <span className={`top-icon ${health.tone}`}>
-          <Gauge size={24} />
-        </span>
-        <div>
-          <small>NETWORK HEALTH</small>
-          <b>{health.label}</b>
-        </div>
-      </div>
+    <header className="flex min-h-[72px] items-center gap-[22px] border-b border-brand-line bg-white px-[30px] max-[920px]:h-auto max-[920px]:flex-wrap max-[920px]:px-3.5 max-[920px]:py-3.5">
+      <TopStat tone="satellite" Icon={Activity} label="Pods online" value={`${overview?.counts?.podsOnline || 0} / ${overview?.counts?.podsTotal || 0}`} />
+      <TopStat tone={mode.key} Icon={mode.Icon} label="Current mode" value={mode.label} />
+      <TopStat tone={health.tone} Icon={Gauge} label="Network health" value={health.label} />
 
-      <div className="search-wrap">
-        <Search className="search-icon" size={22} />
+      <div className="relative ml-auto w-[min(440px,31vw)] max-[920px]:order-10 max-[920px]:w-full">
+        <Search className="pointer-events-none absolute right-4 top-[11px] text-[#58708d]" size={22} />
         <input
-          className="search-input"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search pods, requests, locations..."
+          className="h-11 w-full rounded-[11px] border border-[#d8e2ef] bg-white px-[18px] pr-12 text-sm text-[#334155] outline-none"
         />
         {search && (
-          <div className="search-results">
+          <div className="absolute inset-x-0 top-[60px] z-20 rounded-[10px] border border-brand-line bg-white p-2 shadow-card">
             {searchResults.length ? (
               searchResults.slice(0, 8).map((item) => (
-                <button className="search-item" key={`${item.type}-${item.id}`} onClick={() => setRoute(item.route)}>
-                  <span>{item.type}</span>
-                  <b>{item.title}</b>
-                  <small>{item.detail}</small>
+                <button
+                  className="grid w-full grid-cols-[78px_1fr] gap-x-2.5 gap-y-1 rounded-lg p-2.5 text-left hover:bg-[#f3f7fd]"
+                  key={`${item.type}-${item.id}`}
+                  onClick={() => setRoute(item.route)}
+                >
+                  <span className="row-span-2 text-xs font-extrabold uppercase text-brand-blue">{item.type}</span>
+                  <b className="font-semibold">{item.title}</b>
+                  <small className="text-brand-muted">{item.detail}</small>
                 </button>
               ))
             ) : (
-              <p>No matches found</p>
+              <p className="p-2 text-sm text-brand-muted">No matches found</p>
             )}
           </div>
         )}
       </div>
 
-      <button className="alert-button" aria-label="Alerts" onClick={() => setRoute("/alerts")}>
+      <button className="relative grid h-[42px] w-[42px] shrink-0 place-items-center rounded-full bg-white text-[#52677f]" aria-label="Alerts" onClick={() => setRoute("/alerts")}>
         <Bell size={23} />
-        <span>{overview?.counts?.alerts || overview?.counts?.critical || 0}</span>
+        <span className="absolute right-px top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-brand-red px-1 text-[10px] font-black text-white">
+          {overview?.counts?.alerts || overview?.counts?.critical || 0}
+        </span>
       </button>
 
-      <div className="admin-profile">
-        <b>Admin User</b>
-        <span>Command Center</span>
+      <div className="min-w-[128px] shrink-0 text-right">
+        <b className="block text-sm">Admin User</b>
+        <span className="block text-[11px] text-brand-muted">Command Center</span>
       </div>
     </header>
   );
@@ -477,29 +483,42 @@ function Header({ overview, search, setSearch, searchResults, setRoute }) {
 function Sidebar({ route, setRoute, counts, mode }) {
   const isIsland = mode?.key === "island";
   return (
-    <aside className="sidebar">
-      <div className="brand">
-        <img src="/sanjeevani-logo.png" alt="SANJEEVANI" />
+    <aside className="flex w-64 shrink-0 flex-col bg-[radial-gradient(circle_at_25%_0%,rgba(15,140,255,0.23),transparent_30%),linear-gradient(180deg,#062246,#07182e)] px-4 py-[22px] text-[#e7f2ff] max-[920px]:w-full max-[920px]:flex-none">
+      <div className="mb-7 flex items-center gap-2.5">
+        <img src="/sanjeevani-logo.png" alt="SANJEEVANI" className="h-[54px] w-[54px] object-contain drop-shadow-[0_12px_16px_rgba(20,184,166,0.18)]" />
         <div>
-          <h1>SANJEEVANI</h1>
-          <small>Self-Healing Lifeline Network</small>
+          <h1 className="m-0 text-[22px] leading-none tracking-[0.02em] text-white">SANJEEVANI</h1>
+          <small className="mt-[5px] block text-xs font-semibold text-[#3fd2d0]">Self-Healing Lifeline Network</small>
         </div>
       </div>
 
-      <nav className="nav">
-        {navItems.map(({ path, label, Icon, badge }) => (
-          <button key={path} className={route === path ? "active" : ""} onClick={() => setRoute(path)}>
-            <Icon size={21} />
-            <span>{label}</span>
-            {badge === "requests" && <em>{counts.activeRequests || 0}</em>}
-            {badge === "alerts" && <em>{counts.alerts || 0}</em>}
-          </button>
-        ))}
+      <nav className="grid gap-[7px] max-[920px]:grid-cols-2">
+        {navItems.map(({ path, label, Icon, badge }) => {
+          const active = route === path;
+          return (
+            <button
+              key={path}
+              onClick={() => setRoute(path)}
+              className={`flex min-h-[48px] items-center gap-3.5 rounded-[9px] px-3.5 text-left font-bold ${
+                active ? "bg-gradient-to-br from-[#1768d8] to-[#0f63d4] text-white shadow-[0_14px_28px_rgba(23,104,216,0.28)]" : "bg-transparent text-[#d7e7f7]"
+              }`}
+            >
+              <Icon size={21} />
+              <span>{label}</span>
+              {badge === "requests" && (
+                <em className="ml-auto grid h-[22px] min-w-[22px] place-items-center rounded-full bg-brand-red text-[11px] not-italic text-white">{counts.activeRequests || 0}</em>
+              )}
+              {badge === "alerts" && (
+                <em className="ml-auto grid h-[22px] min-w-[22px] place-items-center rounded-full bg-brand-red text-[11px] not-italic text-white">{counts.alerts || 0}</em>
+              )}
+            </button>
+          );
+        })}
       </nav>
 
-      <section className={`system-health ${isIsland ? "island" : "realtime"}`}>
-        <span />
-        <b>{isIsland ? "Island" : "Realtime"}</b>
+      <section className="mt-[78px] flex min-h-[52px] items-center gap-2.5 rounded-xl border border-white/[0.08] bg-[#0e365f]/[0.66] px-4">
+        <span className={`h-2.5 w-2.5 rounded-full ${isIsland ? "bg-[#fb923c]" : "bg-[#2dd4bf]"}`} />
+        <b className="text-sm font-extrabold text-white">{isIsland ? "Island" : "Realtime"}</b>
       </section>
     </aside>
   );
@@ -1409,44 +1428,6 @@ function NetworkPage({ overview, infraAction, restoreAll }) {
   );
 }
 
-function GraphNode({ className, label, metric, Icon, warn }) {
-  return <div className={`graph-node ${className} ${warn ? "warn" : ""}`}><Icon size={26} /><b>{label}</b><small>{metric}</small></div>;
-}
-
-function NetworkStatusCard({ Icon, label, status, latency, loss, warn }) {
-  return (
-    <div className="network-card">
-      <IconTile Icon={Icon} tone={warn ? "orange" : "teal"} />
-      <b>{label}</b><span className={warn ? "warn" : status === "Down" ? "bad" : "ok"}>{status}</span>
-      <p>Latency <strong>{latency}</strong></p>
-      <p>Packet Loss <strong>{loss}</strong></p>
-      <Sparkline tone={warn ? "orange" : "teal"} points={warn ? [14, 10, 18, 12, 22, 16, 25, 20, 28] : [8, 11, 9, 13, 12, 17, 14, 19, 16]} />
-    </div>
-  );
-}
-
-function QosPanel() {
-  const rows = [
-    ["SOS (Emergency)", "P1 - Highest", 78, "red"],
-    ["Triage (Medical)", "P2 - High", 62, "orange"],
-    ["Logistics (Supply)", "P3 - Medium", 41, "amber"],
-    ["Telemetry (Sensors)", "P4 - Low", 28, "blue"],
-    ["General Internet", "P5 - Lowest", 16, "gray"]
-  ];
-  return (
-    <section className="panel">
-      <div className="panel-head"><h3>QoS Traffic Classes</h3></div>
-      {rows.map(([name, pri, load, tone]) => <div className="qos-row" key={name}><span>{name}</span><b>{pri}</b><div className="bar"><span className={tone} style={{ width: `${load}%` }} /></div><small>Active</small></div>)}
-      <div className="util-row"><span>Total Network Utilization</span><div className="bar"><span style={{ width: "56%" }} /></div><b>56%</b></div>
-    </section>
-  );
-}
-
-function EventLog() {
-  const events = ["Switched to Cellular", "Traffic relayed through POD-02", "Island Mode Activated", "Satellite Link Degraded", "Predictive Failover Standby"];
-  return <section className="panel"><div className="panel-head"><h3>Event Log</h3><button>All Events</button></div>{events.map((event, index) => <div className="event-row" key={event}><IconTile Icon={index === 3 ? AlertTriangle : Activity} tone={index === 3 ? "red" : "blue"} /><b>{event}</b><span>{2 + index * 2} min ago</span><p>{["Satellite degraded. Traffic automatically rerouted.", "Mesh relay established via POD-02.", "Cloud unreachable. Operating autonomously.", "High packet loss detected on satellite.", "AI predicts degradation and is ready to fail over."][index]}</p></div>)}</section>;
-}
-
 function ResourcesPage() {
   const coordinatorResources = [
     {
@@ -1887,11 +1868,11 @@ function App() {
   };
 
   return (
-    <div className="app-shell">
+    <div className="flex min-h-screen max-[920px]:flex-col">
       <Sidebar route={route} setRoute={setRoute} counts={derivedOverview.counts} mode={deriveMode(derivedOverview.infra)} />
-      <main className="main">
+      <main className="min-w-0 flex-1">
         <Header overview={derivedOverview} search={search} setSearch={setSearch} searchResults={searchResults} setRoute={setRoute} />
-        <section className="content">{page()}</section>
+        <section className="px-[34px] pb-9 pt-7">{page()}</section>
       </main>
     </div>
   );

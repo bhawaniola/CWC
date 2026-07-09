@@ -5,6 +5,7 @@ import EmergencyRequestForm from "./components/EmergencyRequestForm.jsx";
 import HeroPanel from "./components/HeroPanel.jsx";
 import LocationSelector from "./components/LocationSelector.jsx";
 import PodNetworkDetails from "./components/PodNetworkDetails.jsx";
+import PodSensorPanel from "./components/PodSensorPanel.jsx";
 import ResilienceBanner from "./components/ResilienceBanner.jsx";
 import TopNavigation from "./components/TopNavigation.jsx";
 import TrustFooter from "./components/TrustFooter.jsx";
@@ -67,6 +68,7 @@ function SanjeevaniApp() {
         />
         <div className="side-column">
           <LocationSelector location={location} onChange={setLocation} />
+          <PodSensorPanel />
           <PodNetworkDetails status={podStatus} onStatusChange={setPodStatus} />
         </div>
       </section>

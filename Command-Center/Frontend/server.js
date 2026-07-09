@@ -20,6 +20,8 @@ const CLOUD_SOCKET_URL = normalizeUrl(process.env.CLOUD_SOCKET_URL || CLOUD_URL)
 const CONTROLLER_URL = normalizeUrl(
   process.env.SIMULATION_CONTROLLER_URL || "http://simulation-controller:9300"
 );
+const INFRA_CONTROL_KEY = process.env.INFRA_CONTROL_KEY || "sanjeevani-infra-demo-key";
+const CONTROLLER_AUTH_HEADERS = { "x-infra-token": INFRA_CONTROL_KEY };
 const POD_URLS = String(process.env.POD_URLS || "")
   .split(",")
   .map((entry) => entry.trim())
@@ -315,7 +317,11 @@ app.post("/api/infra/:target/:action", async (req, res) => {
   const results = {};
   for (const t of targets) {
     try {
-      const response = await axios.post(`${CONTROLLER_URL}/api/infra/${t}/${action}`, {}, { timeout: 8000 });
+      const response = await axios.post(
+        `${CONTROLLER_URL}/api/infra/${t}/${action}`,
+        {},
+        { timeout: 8000, headers: CONTROLLER_AUTH_HEADERS }
+      );
       results[t] = response.data?.status || "ok";
     } catch (error) {
       results[t] = error.response?.data?.message || "error";
@@ -328,7 +334,11 @@ app.post("/api/infra/restore-all", async (req, res) => {
   const results = {};
   for (const t of ["satellite", "celltower-1", "celltower-2"]) {
     try {
-      await axios.post(`${CONTROLLER_URL}/api/infra/${t}/restore`, {}, { timeout: 8000 });
+      await axios.post(
+        `${CONTROLLER_URL}/api/infra/${t}/restore`,
+        {},
+        { timeout: 8000, headers: CONTROLLER_AUTH_HEADERS }
+      );
       results[t] = "restored";
     } catch (error) {
       results[t] = "error";

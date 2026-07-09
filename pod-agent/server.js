@@ -115,19 +115,28 @@ function parseCoordinatorRoutes(value) {
 
 const COORDINATOR_ROLE_MATCHERS = {
   hospital: {
-    categories: ["medical"],
+    categories: ["medical", "medical/rescue"],
     keywords: [
       "ambulance",
       "blood",
+      "breathe",
+      "breathing",
+      "chest pain",
       "doctor",
+      "fracture",
+      "heart",
       "hospital",
       "icu",
       "injury",
+      "injured",
       "insulin",
       "medicine",
       "oxygen",
       "patient",
-      "triage"
+      "pregnant",
+      "stroke",
+      "triage",
+      "unconscious"
     ]
   },
   shelter: {
