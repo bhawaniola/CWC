@@ -2160,3 +2160,23 @@ button {
     justify-self: start;
   }
 }
+
+.map-fallback {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  min-height: 260px;
+  padding: 24px;
+  border-radius: 10px;
+  background: #eef4ec;
+  color: #46586f;
+  text-align: center;
+}
+
+.map-fallback b {
+  color: #14508f;
+}
+
+.map-fallback span {
+  font-size: 13px;
+}

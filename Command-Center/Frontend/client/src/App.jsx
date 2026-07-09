@@ -572,6 +572,22 @@ function MetricCard({ Icon, tone, label, value, sub, points, imageSrc }) {
   );
 }
 
+function MapImage({ alt }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <div className="map-fallback">
+        <MapPin size={26} />
+        <b>Map is loading or unavailable</b>
+        <span>Refresh the page; the zone map image will reappear.</span>
+      </div>
+    );
+  }
+
+  return <img src="/assets/network-map.png" alt={alt} loading="lazy" onError={() => setFailed(true)} />;
+}
+
 function MapPanel({ title = "Pod & Shelter Locations", zones = false, onViewFullMap }) {
   return (
     <section className="panel map-panel">
@@ -580,7 +596,7 @@ function MapPanel({ title = "Pod & Shelter Locations", zones = false, onViewFull
         <button onClick={onViewFullMap}>View full map</button>
       </div>
       <div className={`map-canvas image-map ${zones ? "zones" : ""}`}>
-        <img src="/assets/network-map.png" alt="SANJEEVANI network zone map" />
+        <MapImage alt="SANJEEVANI network zone map" />
         {zones && (
           <>
             <strong className="zone z1">Zone 1</strong>
@@ -960,7 +976,7 @@ function Dashboard({ overview, requests, setRoute }) {
               <button onClick={() => setFullMapOpen(false)}>Close</button>
             </div>
             <div className="full-map-canvas">
-              <img src="/assets/network-map.png" alt="SANJEEVANI full pod and shelter map" />
+              <MapImage alt="SANJEEVANI full pod and shelter map" />
             </div>
           </section>
         </div>
@@ -1308,7 +1324,7 @@ function PodsPage({ overview }) {
               <button onClick={() => setFullMapOpen(false)}>Close</button>
             </div>
             <div className="full-map-canvas">
-              <img src="/assets/network-map.png" alt="SANJEEVANI full pod network map" />
+              <MapImage alt="SANJEEVANI full pod network map" />
             </div>
           </section>
         </div>
