@@ -45,6 +45,9 @@ services:
       OLLAMA_URL: http://ollama:11434
       AI_TRIAGE_MODEL: qwen2.5:3b
       AI_TRIAGE_ENABLED: "true"
+      # Webex alerts: token lives in the gitignored .env file, never here.
+      WEBEX_BOT_TOKEN: ${WEBEX_BOT_TOKEN:-}
+      WEBEX_ROOM_ID: ${WEBEX_ROOM_ID:-}
       POD_URLS: "POD-01=http://pod-01:8000,POD-02=http://pod-02:8000,POD-03=http://pod-03:8000,POD-04=http://pod-04:8000,POD-05=http://pod-05:8000,POD-06=http://pod-06:8000,POD-07=http://pod-07:8000,POD-08=http://pod-08:8000,POD-09=http://pod-09:8000,POD-10=http://pod-10:8000"
       SATELLITE_URL: http://satellite:9100
       CELL_TOWER_URLS: "CELLTOWER-1=http://celltower-1:9201,CELLTOWER-2=http://celltower-2:9202"

@@ -214,6 +214,28 @@ the real model:
 py -3 integrations/ai_triage_test.py
 ```
 
+## Webex Alerts — Sanjeevni-Sentinel bot
+
+The cloud posts real Cisco Webex messages into the responders' space
+(`SANJEEVNI Alerts`) when: a **critical SOS** arrives, the **AI upgrades** a
+request to critical (the alert says "caught by AI triage" with the model's
+reason), or a **sensor early warning** fires. Alerts land as push
+notifications on every member's phone — the field team hears about the
+emergency even when nobody is watching a dashboard.
+
+Setup: copy `.env.example` to `.env`, paste the bot token (from
+developer.webex.com > My Webex Apps), and add `sanjeevni_sentinel@webex.bot`
+to any Webex space — the bot auto-discovers its spaces, no ids needed.
+
+Guard rails (same "enhancer, never gatekeeper" rule as the AI):
+- fire-and-forget with timeout — dead internet costs a log line, nothing else;
+- failed sends retry a few times (30s apart) with room re-discovery;
+- one alert per request id ever, max 6/minute (a surge cannot spam phones);
+- demo-seed requests and stale re-processed records never alert.
+
+Endpoints: `GET /api/webex/health`, `POST /api/webex/test` (rehearsal ping).
+The `.env` file is gitignored — the token must never reach GitHub.
+
 ## 10-Pod Topology
 
 ```text
@@ -426,6 +448,13 @@ py -3 integrations/integration_test.py
     **Generate SITREP** on the dashboard for the AI's 30-second briefing.
     Kill the ollama container and repeat: everything still flows, cards
     read "rule-based triage" — AI is an enhancer, never a gatekeeper.
+15. **Phone in the pocket**: with the Webex app installed, submit an SOS
+    with critical words ("unconscious", "bleeding") — the SANJEEVNI Alerts
+    space buzzes within seconds, naming the citizen, location, and routed
+    coordinators. Then submit one with NO critical words ("speech is
+    slurring, face drooping") — the phone buzzes ~15s later with
+    "🤖 caught by AI triage" and the model's reason. Spike a sensor and the
+    ⚠️ early-warning alert lands too.
 
 ## Stop And Reset
 

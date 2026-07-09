@@ -46,20 +46,20 @@ def check(label, ok, detail=""):
 
 
 try:
-    start(["node", "mock_ollama.js"], SCRATCH, {"PORT": "11434"}, "mock-ollama.log")
+    start(["node", "mock_ollama.js"], SCRATCH, {"PORT": "21434"}, "mock-ollama.log")
     start(["node", "server.js"], os.path.join(ROOT, "Command-Center", "Backend"),
-          {"PORT": "9100", "OLLAMA_URL": "http://127.0.0.1:11434",
+          {"PORT": "19200", "OLLAMA_URL": "http://127.0.0.1:21434",
            "AI_TRIAGE_MODEL": "qwen2.5:3b", "AI_TRIAGE_ENABLED": "true",
            "MONGODB_TIMEOUT_MS": "500"}, "cloud-ai.log")
-    assert wait_up("http://127.0.0.1:11434/api/tags"), "mock ollama did not start"
-    assert wait_up("http://127.0.0.1:9100/api/health"), "cloud did not start"
+    assert wait_up("http://127.0.0.1:21434/api/tags"), "mock ollama did not start"
+    assert wait_up("http://127.0.0.1:19200/api/health"), "cloud did not start"
 
     print("\n[1] AI health endpoint")
-    health = http("GET", "http://127.0.0.1:9100/api/ai/health")["data"]
+    health = http("GET", "http://127.0.0.1:19200/api/ai/health")["data"]
     check("ai health reports ready", health.get("status") == "ready", str(health.get("status")))
 
     print("\n[2] Keyword-missed SOS -> AI upgrade")
-    req = http("POST", "http://127.0.0.1:9100/api/requests",
+    req = http("POST", "http://127.0.0.1:19200/api/requests",
                {"id": "ai-test-1", "name": "Ramu", "category": "Other",
                 "message": "my chest feels heavy and I'm dizzy",
                 "location": "Kothapalli Zone 3", "podId": "POD-03",
@@ -69,7 +69,7 @@ try:
 
     verdict = None
     for _ in range(30):
-        stored = next(item for item in http("GET", "http://127.0.0.1:9100/api/requests")["data"]
+        stored = next(item for item in http("GET", "http://127.0.0.1:19200/api/requests")["data"]
                       if item["id"] == "ai-test-1")
         if stored.get("aiTriage", {}).get("status") == "complete":
             verdict = stored
@@ -89,23 +89,23 @@ try:
         check("routing evidence names AI triage", "AI triage" in evidence)
 
     print("\n[3] SITREP")
-    sitrep = http("POST", "http://127.0.0.1:9100/api/sitrep", {})
+    sitrep = http("POST", "http://127.0.0.1:19200/api/sitrep", {})
     check("sitrep generated", sitrep.get("success") is True
           and "SITUATION" in sitrep.get("data", {}).get("report", ""))
-    cached = http("GET", "http://127.0.0.1:9100/api/sitrep")
+    cached = http("GET", "http://127.0.0.1:19200/api/sitrep")
     check("sitrep cached for reload", cached.get("data", {}).get("report") == sitrep["data"]["report"])
 
     print("\n[4] Model down -> rule-based verdict stands, nothing blocked")
     PROCS[0][0].terminate()
     time.sleep(1)
-    req = http("POST", "http://127.0.0.1:9100/api/requests",
+    req = http("POST", "http://127.0.0.1:19200/api/requests",
                {"id": "ai-test-2", "name": "Sita", "category": "Other",
                 "message": "need some information about relief camp",
                 "location": "Zone 2", "podId": "POD-05", "triage": {"severity": 3}})
     check("request still accepted instantly", req.get("success") is True)
     fallback = None
     for _ in range(30):
-        stored = next(item for item in http("GET", "http://127.0.0.1:9100/api/requests")["data"]
+        stored = next(item for item in http("GET", "http://127.0.0.1:19200/api/requests")["data"]
                       if item["id"] == "ai-test-2")
         if stored.get("aiTriage"):
             fallback = stored

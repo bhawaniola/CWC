@@ -6,6 +6,7 @@ const axios = require("axios");
 const mongoose = require("mongoose");
 const { Server } = require("socket.io");
 const aiTriage = require("./services/aiTriage");
+const webex = require("./services/webexNotifier");
 
 const app = express();
 const server = http.createServer(app);
@@ -1237,6 +1238,16 @@ async function applyAiTriage(request) {
     // Already-delivered coordinators are skipped by the delivery guard and
     // pick the upgrade up through their normal cloud pull.
     await routeRequestToCoordinators(requests[index], true);
+
+    // The AI just turned a quiet request into a critical one — buzz the
+    // responders' Webex space. (Dedup by id keeps requests that already
+    // alerted at ingest silent here.)
+    if (upgraded && nowCritical) {
+      const refreshed = requests.find((item) => item.id === request.id);
+      if (refreshed) {
+        webex.notifyCriticalRequest(refreshed, { aiUpgraded: true });
+      }
+    }
   } catch (error) {
     const index = requests.findIndex((item) => item.id === request.id);
     if (index >= 0 && requests[index].aiTriage?.status !== "complete") {
@@ -1559,14 +1570,16 @@ async function storeRequest(body) {
 
   // A hazard pack fired at a pod and the early warning just reached the
   // cloud through whatever path survived — answer with a signed broadcast
-  // to every pod (production: Webex Connect SMS blast + Webex EOC room).
+  // to every pod, and buzz the responders' Webex space.
   if (!duplicate && request.category === "EARLY-WARNING") {
     broadcastAlert({
       hazard: request.hazard || "hazard",
       message: request.message,
       scope: "all"
     }).catch((error) => console.warn(`[cloud-api] broadcast failed: ${error.message}`));
+    webex.notifyEarlyWarning(storedRequest);
   }
+
 
   if (!duplicate && request.category === "SECURITY") {
     console.log(`[cloud-api] SECURITY EVENT from ${request.podId}: ${request.message}`);
@@ -1647,10 +1660,18 @@ async function storeRequest(body) {
   }
 
   await routeRequestToCoordinators(storedRequest, duplicate);
+  const routedRequest = requests.find((item) => item.id === storedRequest.id) || storedRequest;
+
+  // A citizen SOS that is critical at ingest buzzes the responders' Webex
+  // space right away (after routing, so the alert can name the targets); one
+  // the AI upgrades later alerts from the triage worker instead.
+  if (!duplicate && !isCoordinatorEvent(request) && !["EARLY-WARNING", "SECURITY"].includes(request.category) && routedRequest.isCritical) {
+    webex.notifyCriticalRequest(routedRequest);
+  }
 
   // Fire-and-forget: the SOS is already stored, queued, and delivered before
   // the model ever sees it. A slow or dead model can never block an SOS.
-  applyAiTriage(requests.find((item) => item.id === storedRequest.id) || storedRequest).catch(
+  applyAiTriage(routedRequest).catch(
     (error) => console.warn(`[cloud-api][ai] background triage failed: ${error.message}`)
   );
 
@@ -1794,6 +1815,20 @@ app.get("/api/health", (req, res) => {
 
 app.get("/api/ai/health", async (req, res) => {
   res.json({ success: true, data: await aiTriage.aiHealth() });
+});
+
+app.get("/api/webex/health", async (req, res) => {
+  res.json({ success: true, data: await webex.webexHealth() });
+});
+
+// Demo-rehearsal helper: posts a harmless test alert into the bot's spaces.
+app.post("/api/webex/test", async (req, res) => {
+  try {
+    const result = await webex.sendTestAlert();
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(503).json({ success: false, message: error.message });
+  }
 });
 
 // AI situation report: the operator presses one button and gets a 30-second
