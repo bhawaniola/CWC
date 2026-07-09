@@ -838,7 +838,7 @@ function towerForTarget(target, links) {
 }
 
 async function attemptCoordinatorDelivery(delivery, links, trigger = "auto") {
-  if (delivery.status === "delivered") {
+  if (["delivered", "resolved", "rejected"].includes(delivery.status)) {
     return delivery;
   }
 
@@ -884,6 +884,36 @@ async function attemptCoordinatorDelivery(delivery, links, trigger = "auto") {
   for (const route of routeCandidates) {
     try {
       const result = await postToCoordinator(delivery, route);
+
+      // The coordinator's HTTP reply is the receipt. A 2xx with
+      // accepted:false means it answered but refused the request (role
+      // mismatch) — that is a permanent "rejected", never "delivered".
+      if (!result.accepted) {
+        const rejected = {
+          ...delivery,
+          status: "rejected",
+          rejectedAt: nowIso(),
+          lastReason: result.message || "Coordinator declined: request does not match its role.",
+          attempts: [
+            ...attempts,
+            {
+              at: nowIso(),
+              trigger,
+              status: "rejected",
+              transport: route.transport,
+              linkName: route.linkName,
+              httpStatus: result.status
+            }
+          ].slice(-10),
+          updatedAt: nowIso()
+        };
+        await persistDelivery(rejected);
+        console.log(
+          `[cloud-api][delivery][${delivery.requestId}] REJECTED by ${delivery.targetCoordinatorName}: ${rejected.lastReason}`
+        );
+        return rejected;
+      }
+
       const delivered = {
         ...delivery,
         status: "delivered",
@@ -959,13 +989,81 @@ function buildDelivery(request, target, classification) {
   };
 }
 
+// Latest shortage level per coordinator field (from coordinator-resource-
+// shortage events). Used to steer new deliveries away from out-of-stock
+// teams while a same-role alternative still has capacity.
+const coordinatorShortageLevels = new Map(); // coordinatorId -> Map(fieldId -> level)
+
+function recordCoordinatorShortage(coordinatorId, fieldId, level) {
+  const fields = coordinatorShortageLevels.get(coordinatorId) || new Map();
+  if (level) {
+    fields.set(fieldId, level);
+  } else {
+    fields.delete(fieldId);
+  }
+  coordinatorShortageLevels.set(coordinatorId, fields);
+}
+
+function coordinatorIsOutOfStock(coordinatorId) {
+  const fields = coordinatorShortageLevels.get(coordinatorId);
+  if (!fields) {
+    return false;
+  }
+  return Array.from(fields.values()).includes("out-of-stock");
+}
+
+function targetsWithStock(targets, roles) {
+  const finalTargets = [];
+
+  for (const role of roles) {
+    const roleTargets = targets.filter((target) => target.role === role);
+    const stocked = roleTargets.filter((target) => !coordinatorIsOutOfStock(target.id));
+
+    for (const skipped of roleTargets.filter((target) => !stocked.includes(target))) {
+      console.log(
+        `[cloud-api][routing] skipping ${skipped.name}: reported out-of-stock${
+          stocked.length ? `; ${stocked.map((target) => target.name).join(", ")} covers ${role}` : ""
+        }`
+      );
+    }
+
+    // If every coordinator of this role is out of stock, deliver anyway —
+    // a struggling responder is still better than silence.
+    finalTargets.push(...(stocked.length ? stocked : roleTargets));
+  }
+
+  return finalTargets;
+}
+
 async function routeRequestToCoordinators(request, duplicate = false) {
-  if (isCoordinatorEvent(request) || ["EARLY-WARNING", "SECURITY"].includes(request.category)) {
+  // EARLY-WARNING hazards are broadcast to every pod elsewhere, but the
+  // responder coordinators (fire dept for wildfire smoke, flood rescue for
+  // rising water, ...) still need a delivery, so they are routed here too.
+  if (isCoordinatorEvent(request) || request.category === "SECURITY") {
     return [];
   }
 
   const classification = classifyRequest(request);
-  const targets = coordinatorTargetsForClassification(classification);
+
+  // Hazard packs name their responder roles explicitly; trust that over
+  // keyword guessing (earthquake/heatwave alert texts match no keywords,
+  // which would otherwise fall back to shelter).
+  const declaredRoles = Array.isArray(request.roles)
+    ? request.roles.filter((role) => ROUTING_RULES[role])
+    : [];
+  if (declaredRoles.length > 0) {
+    classification.roles = declaredRoles;
+    classification.departments = declaredRoles.map((role) => ({
+      role,
+      label: ROUTING_RULES[role].label,
+      evidence: [`hazard pack "${request.hazard || "hazard"}" names this responder role`]
+    }));
+    classification.summary = classification.departments.map((item) => item.label).join(", ");
+  }
+  const targets = targetsWithStock(
+    coordinatorTargetsForClassification(classification),
+    classification.roles
+  );
   const targetSummary = targets.map((target) => ({
     id: target.id,
     name: target.name,
@@ -1038,7 +1136,7 @@ async function retryQueuedDeliveries(trigger = "auto") {
   }
 
   activeDeliveryRetry = (async () => {
-    const queued = coordinatorDeliveries.filter((delivery) => delivery.status !== "delivered");
+    const queued = coordinatorDeliveries.filter((delivery) => !["delivered", "resolved", "rejected"].includes(delivery.status));
     if (queued.length === 0) {
       return { success: true, retried: 0, delivered: 0, remaining: 0 };
     }
@@ -1057,7 +1155,7 @@ async function retryQueuedDeliveries(trigger = "auto") {
       success: true,
       retried: queued.length,
       delivered,
-      remaining: coordinatorDeliveries.filter((delivery) => delivery.status !== "delivered").length
+      remaining: coordinatorDeliveries.filter((delivery) => !["delivered", "resolved", "rejected"].includes(delivery.status)).length
     };
   })().finally(() => {
     activeDeliveryRetry = null;
@@ -1211,6 +1309,12 @@ async function storeRequest(body) {
     requests[existingIndex] = {
       ...requests[existingIndex],
       ...request,
+      // The same request arriving again (mesh re-delivery, pod re-sync)
+      // must NOT reset when the cloud first received it, or every entry
+      // shows "just now" and resolutions/routing already stored are lost.
+      cloudReceivedAt: requests[existingIndex].cloudReceivedAt || request.cloudReceivedAt,
+      resolutions: requests[existingIndex].resolutions || request.resolutions,
+      routing: requests[existingIndex].routing || request.routing,
       cloudUpdatedAt: nowIso()
     };
   } else {
@@ -1257,6 +1361,71 @@ async function storeRequest(body) {
         storedEvent.coordinatorId || storedEvent.podId || "unknown-coordinator"
       }`
     );
+
+    // A coordinator ran out of (or recovered) a resource — surface it as its
+    // own realtime signal so the Command Center can flag the coordinator and
+    // operators can reroute new requests to a team that still has stock.
+    // A coordinator acknowledged/resolved a request in the field — reflect it
+    // on the delivery board and the request record so operators see closure.
+    if (request.requestKind === "coordinator-request-resolution" && request.requestId) {
+      const resolutionAt = request.createdAt || nowIso();
+      const deliveryId = `${request.requestId}:${request.coordinatorId}`;
+      const delivery = coordinatorDeliveries.find((item) => item.id === deliveryId);
+      if (delivery) {
+        await persistDelivery({
+          ...delivery,
+          status: request.resolutionStatus === "resolved" ? "resolved" : delivery.status,
+          resolutionStatus: request.resolutionStatus,
+          resolutionAt,
+          lastReason: request.message,
+          updatedAt: nowIso()
+        });
+      }
+
+      const requestIndex = requests.findIndex((item) => item.id === request.requestId);
+      if (requestIndex >= 0) {
+        const resolutions = Array.isArray(requests[requestIndex].resolutions)
+          ? requests[requestIndex].resolutions.filter(
+              (item) => item.coordinatorId !== request.coordinatorId
+            )
+          : [];
+        resolutions.push({
+          coordinatorId: request.coordinatorId,
+          coordinatorName: request.coordinatorName,
+          status: request.resolutionStatus,
+          at: resolutionAt
+        });
+        requests[requestIndex] = {
+          ...requests[requestIndex],
+          resolutions,
+          resolutionSummary: resolutions
+            .map((item) => `${item.coordinatorName || item.coordinatorId}: ${item.status}`)
+            .join("; "),
+          cloudUpdatedAt: nowIso()
+        };
+        await persistDocument(CloudRequest, { id: request.requestId }, requests[requestIndex]);
+        emitRealtime("request:updated", requests[requestIndex]);
+      }
+
+      console.log(
+        `[cloud-api] ${request.coordinatorName || request.coordinatorId} ${request.resolutionStatus} request ${request.requestId}`
+      );
+    }
+
+    if (request.requestKind === "coordinator-resource-shortage") {
+      const shortageCoordinatorId = request.coordinatorId || request.podId;
+      if (shortageCoordinatorId && request.field?.id) {
+        recordCoordinatorShortage(shortageCoordinatorId, request.field.id, request.shortageLevel || null);
+      }
+      if (request.shortageLevel) {
+        console.warn(
+          `[cloud-api] RESOURCE ${request.shortageLevel.toUpperCase()} at ${
+            request.coordinatorName || request.coordinatorId
+          }: ${request.message}`
+        );
+      }
+      emitRealtime("coordinator-shortage:updated", storedEvent);
+    }
   }
 
   await routeRequestToCoordinators(storedRequest, duplicate);
@@ -1391,7 +1560,7 @@ app.get("/api/health", (req, res) => {
       coordinatorEvents: coordinatorEvents.length,
       coordinatorMessages: coordinatorMessages.length,
       coordinatorDeliveries: coordinatorDeliveries.length,
-      queuedCoordinatorDeliveries: coordinatorDeliveries.filter((delivery) => delivery.status !== "delivered").length,
+      queuedCoordinatorDeliveries: coordinatorDeliveries.filter((delivery) => !["delivered", "resolved", "rejected"].includes(delivery.status)).length,
       sensorReadings: sensorReadings.length,
       alertsSent: alertsSent.length,
       checkedAt: nowIso()

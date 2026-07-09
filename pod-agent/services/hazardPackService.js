@@ -6,6 +6,10 @@ const SENSOR_FILE = path.join(DATA_DIR, "sensor-readings.json");
 const ALERT_FILE = path.join(DATA_DIR, "alerts.json");
 const TRIGGER_FILE = path.join(DATA_DIR, "hazard-triggers.json");
 
+// `roles` names the responder teams for each hazard. It drives BOTH the
+// direct pod -> in-range coordinator notification and the cloud's routing,
+// so a hazard never depends on its alert text happening to contain a
+// role keyword (earthquake/heatwave texts don't).
 const HAZARD_PACKS = [
   {
     name: "flood",
@@ -14,6 +18,7 @@ const HAZARD_PACKS = [
     trendWindow: 5,
     trendMinRise: 25,
     severity: 9,
+    roles: ["flood", "shelter"],
     alert:
       "FLOOD WARNING at {site}: water level {value} cm and rising. Move to elevated shelter now. Follow volunteer instructions."
   },
@@ -22,6 +27,7 @@ const HAZARD_PACKS = [
     sensor: "shake_g",
     threshold: 0.4,
     severity: 10,
+    roles: ["hospital", "workforce"],
     alert:
       "EARTHQUAKE detected near {site} ({value} g). If safe, gather at the open assembly area. Report missing persons at the help desk or portal."
   },
@@ -30,6 +36,7 @@ const HAZARD_PACKS = [
     sensor: "temperature",
     threshold: 45,
     severity: 7,
+    roles: ["hospital", "shelter"],
     alert:
       "HEATWAVE advisory at {site}: {value} C. Cooling center open. Check on elderly neighbours."
   },
@@ -44,6 +51,7 @@ const HAZARD_PACKS = [
     trendWindow: 5,
     trendMinRise: 120,
     severity: 8,
+    roles: ["fire", "workforce"],
     alert:
       "WILDFIRE SMOKE alert at {site}: air quality {value} ug/m3 PM2.5 (hazardous). Close windows, mask up, and move indoors or evacuate on volunteer advice."
   }
@@ -175,6 +183,7 @@ function recordSensorReading(identity, body = {}) {
       source: "local-hazard-pack",
       hazard: pack.name,
       severity: pack.severity,
+      roles: pack.roles || [],
       scope: identity.podId,
       message: formatAlert(pack.alert, {
         site: identity.podName,

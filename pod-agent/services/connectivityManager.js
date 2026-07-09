@@ -566,6 +566,10 @@ async function sendPodAlert(alert) {
     ...alert,
     id: alert.id || `alert-${Date.now()}`,
     type: "hazard-alert",
+    // The cloud only answers with a signed broadcast to every pod when it
+    // sees this category — without it the alert lands as a plain request
+    // and the "warn all pods" step silently never happens.
+    category: alert.category || "EARLY-WARNING",
     podId: alert.podId || identity.podId,
     podName: alert.podName || identity.podName,
     region: alert.region || identity.region,
@@ -583,10 +587,22 @@ async function sendPodAlert(alert) {
 }
 
 async function sendSecurityEvent(event) {
-  return enqueueSystemEvent("SECURITY", {
+  const identity = getPodIdentity();
+  const queuedEvent = {
+    id: `security-${identity.podId}-${Date.now()}`,
+    type: "security-event",
+    category: "SECURITY",
     message: event.detail,
-    triage: { severity: event.severity || 9, priority: "critical", reason: "Shield: rejected at pod" }
-  });
+    triage: { severity: event.severity || 9, priority: "critical", reason: "Shield: rejected at pod" },
+    podId: identity.podId,
+    podName: identity.podName,
+    region: identity.region,
+    syncStatus: "queued-at-origin-pod",
+    queuedAt: new Date().toISOString()
+  };
+
+  localQueue.enqueue(queuedEvent);
+  return { success: true, queued: true, id: queuedEvent.id };
 }
 
 // ---- SANJEEVANI-Shield enrollment: fetch the cloud's alert-signing public

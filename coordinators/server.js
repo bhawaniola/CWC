@@ -352,6 +352,7 @@ function defaultState() {
     tasks: roleTemplate.tasks,
     incidents: roleTemplate.incidents,
     inbox: [],
+    history: [],
     hazardUpdates: [
       {
         id: `${identity.coordinatorId}-weather-brief`,
@@ -383,6 +384,7 @@ function mergeState(saved) {
     tasks: Array.isArray(saved.tasks) && saved.tasks.length ? saved.tasks : base.tasks,
     incidents: Array.isArray(saved.incidents) && saved.incidents.length ? saved.incidents : base.incidents,
     inbox: Array.isArray(saved.inbox) ? saved.inbox : [],
+    history: Array.isArray(saved.history) ? saved.history : [],
     hazardUpdates: Array.isArray(saved.hazardUpdates) ? saved.hazardUpdates : base.hazardUpdates
   };
 }
@@ -667,6 +669,74 @@ function buildFieldUpdateEvent(field, state, route) {
   };
 }
 
+// A numeric resource at zero is "out-of-stock"; at or under 10% of its max
+// it is "low-stock". Both sync to the Command Center so it can reroute new
+// requests toward a coordinator that still has capacity.
+const LOW_STOCK_RATIO = 0.1;
+
+function shortageLevelFor(field) {
+  if (field.inputType !== "number" || !Number.isFinite(field.value)) {
+    return null;
+  }
+
+  if (field.value <= 0) {
+    return "out-of-stock";
+  }
+
+  const max = Number(field.max);
+  if (Number.isFinite(max) && max > 0 && field.value <= max * LOW_STOCK_RATIO) {
+    return "low-stock";
+  }
+
+  return null;
+}
+
+function buildShortageEvent(field, level, route) {
+  const outOfStock = level === "out-of-stock";
+  const recovered = level === null;
+  const message = recovered
+    ? `${identity.coordinatorName}: ${field.label} restocked to ${fieldValueForDisplay(field)}. Coordinator can take new assignments again.`
+    : `${identity.coordinatorName}: ${field.label} ${
+        outOfStock ? "is OUT OF STOCK" : "is running low"
+      } (${fieldValueForDisplay(field)}). Command Center should route new ${identity.role} requests to another coordinator.`;
+
+  return {
+    id: `coord-shortage-${identity.coordinatorId}-${field.id}-${Date.now()}`,
+    requestKind: "coordinator-resource-shortage",
+    shortageLevel: level,
+    podId: identity.coordinatorId,
+    podName: identity.coordinatorName,
+    coordinatorId: identity.coordinatorId,
+    coordinatorName: identity.coordinatorName,
+    coordinatorRole: identity.role,
+    coordinatorRoleLabel: roleTemplate.roleLabel,
+    category: roleTemplate.roleLabel,
+    location: `${identity.region} | ${identity.coverageNodes.join(", ")}`,
+    severity: recovered ? 3 : outOfStock ? 9 : 6,
+    triage: {
+      severity: recovered ? 3 : outOfStock ? 9 : 6,
+      priority: outOfStock ? "critical" : recovered ? "info" : "high",
+      reason: recovered
+        ? `${field.label} back above shortage threshold`
+        : `${field.label} at ${fieldValueForDisplay(field)}`
+    },
+    message,
+    field: {
+      id: field.id,
+      label: field.label,
+      value: field.value,
+      unit: field.unit,
+      max: field.max,
+      updatedAt: field.updatedAt
+    },
+    network: {
+      activePath: route?.activePath || "queued",
+      mode: route?.mode || "queued"
+    },
+    createdAt: new Date().toISOString()
+  };
+}
+
 function textForMatching(payload) {
   return [
     payload.category,
@@ -808,6 +878,9 @@ function storeIncoming(payload, meta = {}) {
     },
     matchedDepartments: departmentLabels,
     routingSummary: classification.summary || departmentLabels.join(", ") || "",
+    // When the request was created at the origin pod — can be much earlier
+    // than receivedAt if it waited in an offline queue before syncing.
+    originatedAt: payload.createdAt || payload.queuedAt || payload.receivedAt || "",
     receivedAt,
     raw: payload
   };
@@ -827,6 +900,12 @@ function storeIncoming(payload, meta = {}) {
             : item.source,
         transport:
           existingItem.transport === "direct-pod-mesh" ? existingItem.transport : item.transport,
+        // First arrival wins: a second copy over another path must not make
+        // the request look like it just came in, or lose work already done.
+        receivedAt: existingItem.receivedAt || item.receivedAt,
+        lastSeenAt: receivedAt,
+        workStatus: existingItem.workStatus || item.workStatus,
+        acknowledgedAt: existingItem.acknowledgedAt || item.acknowledgedAt,
         seenVia: Array.from(
           new Set([
             ...(Array.isArray(existingItem.seenVia) ? existingItem.seenVia : [existingItem.transport]),
@@ -849,8 +928,13 @@ function storeIncoming(payload, meta = {}) {
     );
   }
 
-  const inbox = state.inbox.filter((existing) => existing.id !== item.id);
-  state.inbox = [mergedItem, ...inbox].slice(0, 80);
+  // A merged duplicate keeps its position; only a genuinely new request
+  // goes on top. Re-pulls from the cloud must not reshuffle the list.
+  if (existingItem) {
+    state.inbox = state.inbox.map((existing) => (existing.id === item.id ? mergedItem : existing));
+  } else {
+    state.inbox = [mergedItem, ...state.inbox].slice(0, 80);
+  }
 
   if (isHazardPayload(payload)) {
     const hazardUpdates = state.hazardUpdates.filter((existing) => existing.id !== item.id);
@@ -1078,6 +1162,14 @@ app.get("/api/coordinator/status", async (req, res) => {
     success: true,
     data: {
       ...state,
+      // Newest first, always. Merge/re-pull churn must never decide the
+      // on-screen order — an operator reads arrival order, latest on top.
+      inbox: [...state.inbox].sort(
+        (left, right) => new Date(right.receivedAt || 0) - new Date(left.receivedAt || 0)
+      ),
+      history: [...(state.history || [])].sort(
+        (left, right) => new Date(right.resolvedAt || 0) - new Date(left.resolvedAt || 0)
+      ),
       role: {
         id: identity.role,
         label: roleTemplate.roleLabel,
@@ -1170,23 +1262,41 @@ app.patch("/api/coordinator/fields/:fieldId", async (req, res) => {
     });
   }
 
-  state.fields[fieldIndex] = {
+  const previousShortage = field.shortageLevel || null;
+  const updatedField = {
     ...field,
     value: nextValue,
     updatedAt: new Date().toISOString()
   };
+  const nextShortage = shortageLevelFor(updatedField);
+  updatedField.shortageLevel = nextShortage;
+  state.fields[fieldIndex] = updatedField;
 
   const savedState = saveState(state);
   const route = await calculateMode();
   const event = enqueueSyncEvent(buildFieldUpdateEvent(savedState.fields[fieldIndex], savedState, route));
+
+  // Only alert the Command Center when the shortage level actually changes,
+  // so repeated saves at the same level don't spam the cloud.
+  let shortageEvent = null;
+  if (nextShortage !== previousShortage && (nextShortage || previousShortage)) {
+    shortageEvent = enqueueSyncEvent(buildShortageEvent(savedState.fields[fieldIndex], nextShortage, route));
+    console.log(
+      `[coordinator] ${identity.coordinatorId} ${field.label} shortage level: ${previousShortage || "ok"} -> ${nextShortage || "ok"}`
+    );
+  }
+
   triggerSync("field-update");
 
   res.json({
     success: true,
-    message: "Field updated and queued for cloud sync.",
+    message: shortageEvent
+      ? `Field updated; ${nextShortage ? `${nextShortage} alert` : "restock notice"} queued for Command Center.`
+      : "Field updated and queued for cloud sync.",
     data: {
       field: savedState.fields[fieldIndex],
       event,
+      shortageEvent,
       syncQueueCount: getSyncQueue().length
     }
   });
@@ -1287,6 +1397,89 @@ app.get("/api/coordinator/inbox", (req, res) => {
     success: true,
     count: state.inbox.length,
     data: state.inbox
+  });
+});
+
+// Request lifecycle: acknowledge keeps the item in the inbox with a status;
+// resolve archives it to history. Both queue an acknowledgment event for the
+// Command Center so its delivery board reflects field reality, closing the
+// loop (before this, data only ever flowed downward).
+app.patch("/api/coordinator/inbox/:requestId", async (req, res) => {
+  const nextStatus = String(req.body?.status || "").toLowerCase();
+  if (!["acknowledged", "resolved"].includes(nextStatus)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Inbox status must be "acknowledged" or "resolved".'
+    });
+  }
+
+  const state = getState();
+  const itemIndex = state.inbox.findIndex((item) => item.id === req.params.requestId);
+  if (itemIndex < 0) {
+    return res.status(404).json({
+      success: false,
+      message: "Unknown inbox request."
+    });
+  }
+
+  const now = new Date().toISOString();
+  const note = String(req.body?.note || "").slice(0, 240);
+  let item = {
+    ...state.inbox[itemIndex],
+    workStatus: nextStatus,
+    workNote: note || state.inbox[itemIndex].workNote || "",
+    [`${nextStatus}At`]: now
+  };
+
+  if (nextStatus === "resolved") {
+    state.inbox.splice(itemIndex, 1);
+    state.history = [item, ...state.history].slice(0, 50);
+  } else {
+    state.inbox[itemIndex] = item;
+  }
+
+  const savedState = saveState(state);
+  const route = await calculateMode();
+  const event = enqueueSyncEvent({
+    id: `coord-resolution-${identity.coordinatorId}-${item.id}-${nextStatus}`,
+    requestKind: "coordinator-request-resolution",
+    resolutionStatus: nextStatus,
+    requestId: item.id,
+    deliveryId: item.deliveryId || "",
+    podId: identity.coordinatorId,
+    podName: identity.coordinatorName,
+    coordinatorId: identity.coordinatorId,
+    coordinatorName: identity.coordinatorName,
+    coordinatorRole: identity.role,
+    category: roleTemplate.roleLabel,
+    message: `${identity.coordinatorName} ${nextStatus} "${item.title}"${note ? ` — ${note}` : ""}.`,
+    resolvedRequest: {
+      id: item.id,
+      title: item.title,
+      severity: item.severity,
+      location: item.location,
+      sourcePodId: item.sourcePodId || ""
+    },
+    network: {
+      activePath: route?.activePath || "queued",
+      mode: route?.mode || "queued"
+    },
+    createdAt: now
+  });
+  triggerSync("request-resolution");
+
+  res.json({
+    success: true,
+    message:
+      nextStatus === "resolved"
+        ? "Request archived to history; Command Center will be notified."
+        : "Request acknowledged; Command Center will be notified.",
+    data: {
+      item,
+      inbox: savedState.inbox,
+      history: savedState.history,
+      event
+    }
   });
 });
 

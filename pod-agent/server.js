@@ -204,6 +204,13 @@ function requestMatchesCoordinatorRole(role, request) {
     return true;
   }
 
+  // Hazard-pack alerts carry their responder roles explicitly (flood ->
+  // flood+shelter, earthquake -> hospital+workforce, ...), so they route
+  // even when the alert text contains no role keyword.
+  if (Array.isArray(request.roles) && request.roles.includes(role)) {
+    return true;
+  }
+
   const matcher = COORDINATOR_ROLE_MATCHERS[role];
   if (!matcher) {
     return false;
@@ -596,6 +603,32 @@ app.post("/api/sensors", async (req, res) => {
       } catch (error) {
         console.warn(
           `[pod-agent] ${identity.podId} could not report hazard ${alert.hazard}: ${error.message}`
+        );
+      }
+    }
+
+    // A fired hazard also goes straight to relief teams in URWB radio range
+    // (same shortcut citizen SOS uses), so the local fire/flood camp reacts
+    // even when every uplink to the cloud is down.
+    if (result.fired.length > 0) {
+      const route = await connectivity.calculateMode();
+      for (const alert of result.fired) {
+        notifyMatchingCoordinators(
+          {
+            ...alert,
+            podId: identity.podId,
+            podName: identity.podName,
+            region: identity.region,
+            category: "EARLY-WARNING",
+            location: identity.podName,
+            triage: {
+              severity: alert.severity,
+              priority: alert.severity >= 8 ? "critical" : "high",
+              reason: `Hazard pack "${alert.hazard}" fired at ${identity.podName}`
+            }
+          },
+          route,
+          "hazard-alert"
         );
       }
     }

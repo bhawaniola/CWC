@@ -215,15 +215,13 @@ button {
   align-items: start;
 }
 
-.requests-panel,
-.sensor-panel {
-  grid-column: 1;
-}
-
-.network-quick-panel,
-.map-panel,
-.activity-panel {
-  grid-column: 2;
+/* Each column is an independent stack, so a tall panel on one side no longer
+   stretches shared grid rows and leaves empty holes on the other side. */
+.dashboard-col {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+  min-width: 0;
 }
 
 .panel {
@@ -357,6 +355,11 @@ button {
 .soft-pill.green {
   color: #08795f;
   background: #e4faef;
+}
+
+.soft-pill.teal {
+  color: #0f766e;
+  background: #e6f7f5;
 }
 
 .ok-icon {
@@ -970,9 +973,53 @@ button {
 
 .request-toolbar {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 14px 18px 0;
   background: #ffffff;
+}
+
+.view-switch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #dfe9f6;
+  border-radius: 11px;
+  background: #f3f7fd;
+}
+
+.view-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #46586f;
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.view-switch button.active {
+  background: #ffffff;
+  color: #0f63d4;
+  box-shadow: 0 6px 16px rgba(15, 99, 212, 0.14);
+}
+
+.view-switch button b {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #e2ebf6;
+  color: #46586f;
+  font-size: 11.5px;
+}
+
+.view-switch button.active b {
+  background: #dcebff;
+  color: #0f63d4;
 }
 
 .request-filter-bar {
@@ -1030,8 +1077,10 @@ button {
 
 .request-board {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(520px, 100%), 1fr));
   gap: 14px;
   padding: 18px;
+  align-items: start;
 }
 
 .request-detail-card {
@@ -1042,6 +1091,18 @@ button {
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 14px 30px rgba(15, 23, 42, .04);
+}
+
+.request-detail-card.resolved {
+  border-left: 4px solid #14b8a6;
+  background: #fbfefd;
+}
+
+.request-pills {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
 }
 
 .request-detail-card.focus-pulse {
@@ -1225,13 +1286,24 @@ button {
   background: #e4faef;
 }
 
+.coordinator-chip.resolved {
+  border-color: #9adcc0;
+  background: #f3fcf8;
+}
+
+.coordinator-chip.resolved em {
+  color: #065f46;
+  background: #d3f5e5;
+}
+
 .coordinator-chip.queued em,
 .coordinator-chip.planned em {
   color: #b45309;
   background: #fff4df;
 }
 
-.coordinator-chip.failed em {
+.coordinator-chip.failed em,
+.coordinator-chip.rejected em {
   color: #be123c;
   background: #ffe4e9;
 }

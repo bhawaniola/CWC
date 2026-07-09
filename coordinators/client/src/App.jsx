@@ -11,6 +11,7 @@ import {
   FiEdit3,
   FiHeart,
   FiHome,
+  FiInbox,
   FiLifeBuoy,
   FiMap,
   FiMapPin,
@@ -30,6 +31,7 @@ import {
   syncCoordinator,
   updateCoordinatorField,
   updateCoordinatorTask,
+  updateInboxRequest,
   updateNetworkPath
 } from "./api";
 import sanjeevaniLogo from "./assets/sanjeevani-logo.png";
@@ -337,10 +339,15 @@ function EditableMetric({ field, onChange, pending }) {
   }
 
   return (
-    <label className="metric-editor">
+    <label className={classNames("metric-editor", field.shortageLevel && `stock-${field.shortageLevel}`)}>
       <span>
         <FiEdit3 aria-hidden="true" />
         {field.label}
+        {field.shortageLevel ? (
+          <b className={classNames("stock-chip", field.shortageLevel)}>
+            {field.shortageLevel === "out-of-stock" ? "OUT OF STOCK" : "LOW STOCK"}
+          </b>
+        ) : null}
       </span>
       <div className="metric-input-row">
         <input
@@ -427,11 +434,15 @@ function NetworkCard({ data, onTogglePath, busyPath }) {
   );
 }
 
-function FeedItem({ item, selected, onSelect }) {
+function FeedItem({ item, selected, busy, onSelect, onAction }) {
   return (
-    <button
-      className={classNames("feed-item", item.severity, selected && "selected")}
-      type="button"
+    <article
+      className={classNames(
+        "feed-item",
+        item.severity,
+        selected && "selected",
+        item.workStatus === "acknowledged" && "acknowledged"
+      )}
       onClick={() => onSelect(item)}
     >
       <div className="feed-topline">
@@ -454,9 +465,80 @@ function FeedItem({ item, selected, onSelect }) {
       <footer>
         <span>{item.location}</span>
         <span>{item.source} via {item.transport}</span>
-        <span>{formatTime(item.receivedAt)}</span>
+        <span>
+          received {formatTime(item.receivedAt)}
+          {item.originatedAt && formatTime(item.originatedAt) !== formatTime(item.receivedAt)
+            ? ` (sent ${formatTime(item.originatedAt)})`
+            : ""}
+        </span>
       </footer>
-    </button>
+      <div className="feed-actions">
+        {item.workStatus === "acknowledged" ? (
+          <em className="work-chip">
+            <FiCheckCircle aria-hidden="true" />
+            acknowledged {formatTime(item.acknowledgedAt)}
+          </em>
+        ) : (
+          <button
+            className="action-chip"
+            disabled={busy}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onAction(item, "acknowledged");
+            }}
+          >
+            Acknowledge
+          </button>
+        )}
+        <button
+          className="action-chip resolve"
+          disabled={busy}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onAction(item, "resolved");
+          }}
+        >
+          <FiCheckCircle aria-hidden="true" />
+          Mark handled
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function HistoryList({ history }) {
+  if (!history.length) {
+    return (
+      <div className="empty-state">
+        <FiClock aria-hidden="true" />
+        <strong>No handled requests yet</strong>
+        <span>Requests you mark as handled are archived here and reported to the Command Center.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="history-list">
+      {history.map((item) => (
+        <article className={classNames("history-row", item.severity)} key={`${item.id}-${item.resolvedAt}`}>
+          <div className="history-topline">
+            <strong>{item.title}</strong>
+            <span className="history-when">
+              <FiCheckCircle aria-hidden="true" />
+              handled {formatTime(item.resolvedAt)}
+            </span>
+          </div>
+          <p>{item.message}</p>
+          <footer>
+            <span>{item.location}</span>
+            <span>arrived via {item.transport}</span>
+            <span>received {formatTime(item.receivedAt)}</span>
+          </footer>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -780,6 +862,26 @@ export default function App() {
   const [selectedWorkerIds, setSelectedWorkerIds] = useState([]);
   const [selectedShelterId, setSelectedShelterId] = useState(shelterTargets[0].id);
   const [selectedStagingPointId, setSelectedStagingPointId] = useState(stagingPoints[0].id);
+  const [activeTab, setActiveTab] = useState("operations");
+  const [unseenInbox, setUnseenInbox] = useState(0);
+  const [toasts, setToasts] = useState([]);
+  const [busyRequestId, setBusyRequestId] = useState("");
+  const seenInboxIdsRef = useRef(null);
+  const syncMessageTimerRef = useRef(null);
+
+  // Action feedback ("Water selected...", "Task update queued...") is
+  // transient — show it for a few seconds, then fall back to the idle
+  // status so the header never displays stale text.
+  useEffect(() => {
+    if (syncMessage === "Live coordinator channel ready.") {
+      return undefined;
+    }
+    window.clearTimeout(syncMessageTimerRef.current);
+    syncMessageTimerRef.current = window.setTimeout(() => {
+      setSyncMessage("Live coordinator channel ready.");
+    }, 6000);
+    return () => window.clearTimeout(syncMessageTimerRef.current);
+  }, [syncMessage]);
   const [operationLog, setOperationLog] = useState([
     {
       id: "log-standby",
@@ -812,6 +914,49 @@ export default function App() {
       window.clearInterval(interval);
     };
   }, [refresh]);
+
+  // Watch the inbox between polls: badge the Incoming tab and raise a toast
+  // whenever a request arrives, so nothing lands silently below the fold.
+  useEffect(() => {
+    const inbox = data?.inbox || [];
+
+    if (seenInboxIdsRef.current === null) {
+      seenInboxIdsRef.current = new Set(inbox.map((item) => item.id));
+      return;
+    }
+
+    const fresh = inbox.filter((item) => !seenInboxIdsRef.current.has(item.id));
+    if (!fresh.length) {
+      return;
+    }
+
+    for (const item of fresh) {
+      seenInboxIdsRef.current.add(item.id);
+    }
+
+    if (activeTab !== "intake") {
+      setUnseenInbox((count) => count + fresh.length);
+    }
+
+    setToasts((current) =>
+      [
+        ...fresh.map((item) => ({
+          id: `toast-${item.id}`,
+          title: item.title || "Incoming request",
+          message: item.message || "",
+          severity: item.severity || "medium",
+          transport: item.transport || "mesh"
+        })),
+        ...current
+      ].slice(0, 3)
+    );
+
+    for (const item of fresh) {
+      window.setTimeout(() => {
+        setToasts((current) => current.filter((toast) => toast.id !== `toast-${item.id}`));
+      }, 7000);
+    }
+  }, [data, activeTab]);
 
   const operationEvents = useMemo(() => {
     if (!data) {
@@ -867,6 +1012,23 @@ export default function App() {
       setSyncMessage("Task update queued for cloud sync.");
     } catch (nextError) {
       setSyncMessage(nextError.message);
+    }
+  }
+
+  async function handleInboxAction(item, status) {
+    setBusyRequestId(item.id);
+    try {
+      const result = await updateInboxRequest(item.id, status);
+      setData((current) => ({
+        ...current,
+        inbox: result.data.inbox,
+        history: result.data.history
+      }));
+      setSyncMessage(result.message);
+    } catch (nextError) {
+      setSyncMessage(nextError.message);
+    } finally {
+      setBusyRequestId("");
     }
   }
 
@@ -1028,6 +1190,18 @@ export default function App() {
     return roleIcons[data?.role?.id] || FiActivity;
   }, [data?.role?.id]);
 
+  const shortageFields = useMemo(
+    () => (data?.fields || []).filter((field) => field.shortageLevel),
+    [data?.fields]
+  );
+
+  function openTab(tabId) {
+    setActiveTab(tabId);
+    if (tabId === "intake") {
+      setUnseenInbox(0);
+    }
+  }
+
   if (!data) {
     return (
       <main className="app-shell loading-shell">
@@ -1074,103 +1248,203 @@ export default function App() {
         </div>
       </header>
 
-      <DashboardSpecialist data={data} />
+      <nav className="tab-bar" aria-label="Coordinator sections">
+        <button
+          className={classNames("tab-button", activeTab === "operations" && "active")}
+          type="button"
+          onClick={() => openTab("operations")}
+        >
+          <FiTruck aria-hidden="true" />
+          Operations
+        </button>
+        <button
+          className={classNames("tab-button", activeTab === "intake" && "active")}
+          type="button"
+          onClick={() => openTab("intake")}
+        >
+          <FiInbox aria-hidden="true" />
+          Incoming requests
+          <em className="tab-count">{data.inbox.length}</em>
+          {unseenInbox > 0 ? <b className="tab-badge">{unseenInbox} new</b> : null}
+        </button>
+        <button
+          className={classNames("tab-button", activeTab === "resources" && "active")}
+          type="button"
+          onClick={() => openTab("resources")}
+        >
+          <FiDatabase aria-hidden="true" />
+          Resources &amp; network
+          {shortageFields.length > 0 ? <b className="tab-badge warning">{shortageFields.length}</b> : null}
+        </button>
+        <button
+          className={classNames("tab-button", activeTab === "history" && "active")}
+          type="button"
+          onClick={() => openTab("history")}
+        >
+          <FiClock aria-hidden="true" />
+          Past history
+          <em className="tab-count">{(data.history || []).length}</em>
+        </button>
+      </nav>
 
-      <OperationsBoard
-        ambulanceRoster={ambulances}
-        events={operationEvents}
-        operationLog={operationLog}
-        selectedAmbulanceId={selectedAmbulanceId}
-        selectedEvent={selectedEvent}
-        selectedEventId={selectedEventId}
-        selectedShelterId={selectedShelterId}
-        selectedStagingPointId={selectedStagingPointId}
-        selectedWorkerIds={selectedWorkerIds}
-        workerRoster={workers}
-        onAssignWorkers={handleAssignWorkers}
-        onDispatchAmbulance={handleDispatchAmbulance}
-        onSelectAmbulance={setSelectedAmbulanceId}
-        onSelectEvent={handleSelectEvent}
-        onSelectShelter={setSelectedShelterId}
-        onSelectStagingPoint={setSelectedStagingPointId}
-        onToggleWorker={handleToggleWorker}
-      />
-
-      <section className="main-grid">
-        <section className="panel metrics-panel">
-          <div className="panel-heading">
-            <span className="section-icon" aria-hidden="true">
-              <FiDatabase />
-            </span>
-            <div>
-              <p>Live Metrics</p>
-              <h2>Editable cloud-synced fields</h2>
-            </div>
-          </div>
-          <div className="metrics-grid">
-            {data.fields.map((field) => (
-              <EditableMetric
-                field={field}
-                key={field.id}
-                pending={pendingFields[field.id]}
-                onChange={handleFieldChange}
-              />
-            ))}
-          </div>
-        </section>
-
-        <NetworkCard data={data} busyPath={busyPath} onTogglePath={handleTogglePath} />
-      </section>
-
-      <section className="lower-grid">
-        <section className="panel feed-panel">
-          <div className="panel-heading">
-            <span className="section-icon" aria-hidden="true">
-              <FiRadio />
-            </span>
-            <div>
-              <p>Hazard And Request Intake</p>
-              <h2>Cloud and nearby pod-mesh messages</h2>
-            </div>
-          </div>
-          <div className="feed-list">
-            {data.inbox.length ? (
-              data.inbox.map((item) => (
-                <FeedItem
-                  item={item}
-                  key={item.id}
-                  selected={selectedEventId === item.id}
-                  onSelect={handleSelectEvent}
-                />
-              ))
-            ) : (
-              <div className="empty-state">
-                <FiWifi aria-hidden="true" />
-                <strong>Listening for role-matched requests</strong>
-                <span>Cloud API and nearby pods can post directly into this coordinator.</span>
-              </div>
-            )}
-          </div>
-        </section>
-
-        <div className="right-stack">
-          <TaskList tasks={data.tasks} onTaskChange={handleTaskChange} />
-          <IncidentList
-            incidents={data.incidents}
-            selectedEventId={selectedEventId}
-            onSelectIncident={handleSelectIncident}
-          />
-        </div>
-      </section>
-
-      <section className="hazard-strip">
-        <strong>Hazard updates</strong>
-        {(data.hazardUpdates || []).slice(0, 4).map((item) => (
-          <span className={classNames("hazard-chip", item.severity)} key={item.id}>
-            {item.title}: {item.message}
+      {shortageFields.length > 0 ? (
+        <button className="shortage-banner" type="button" onClick={() => openTab("resources")}>
+          <FiAlertTriangle aria-hidden="true" />
+          <span>
+            {shortageFields.map((field) => field.label).join(", ")}{" "}
+            {shortageFields.length === 1 ? "is" : "are"} low or out of stock — Command Center notified so new
+            requests can be rerouted.
           </span>
-        ))}
-      </section>
+        </button>
+      ) : null}
+
+      {(data.hazardUpdates || []).length > 0 ? (
+        <section className="hazard-strip">
+          <strong>Hazard updates</strong>
+          {(data.hazardUpdates || []).slice(0, 4).map((item) => (
+            <span className={classNames("hazard-chip", item.severity)} key={item.id}>
+              {item.title}: {item.message}
+            </span>
+          ))}
+        </section>
+      ) : null}
+
+      {activeTab === "operations" ? (
+        <>
+          <DashboardSpecialist data={data} />
+
+          <OperationsBoard
+            ambulanceRoster={ambulances}
+            events={operationEvents}
+            operationLog={operationLog}
+            selectedAmbulanceId={selectedAmbulanceId}
+            selectedEvent={selectedEvent}
+            selectedEventId={selectedEventId}
+            selectedShelterId={selectedShelterId}
+            selectedStagingPointId={selectedStagingPointId}
+            selectedWorkerIds={selectedWorkerIds}
+            workerRoster={workers}
+            onAssignWorkers={handleAssignWorkers}
+            onDispatchAmbulance={handleDispatchAmbulance}
+            onSelectAmbulance={setSelectedAmbulanceId}
+            onSelectEvent={handleSelectEvent}
+            onSelectShelter={setSelectedShelterId}
+            onSelectStagingPoint={setSelectedStagingPointId}
+            onToggleWorker={handleToggleWorker}
+          />
+        </>
+      ) : null}
+
+      {activeTab === "intake" ? (
+        <section className="lower-grid">
+          <section className="panel feed-panel">
+            <div className="panel-heading">
+              <span className="section-icon" aria-hidden="true">
+                <FiRadio />
+              </span>
+              <div>
+                <p>Hazard And Request Intake</p>
+                <h2>Cloud and nearby pod-mesh messages</h2>
+              </div>
+            </div>
+            <div className="feed-list">
+              {data.inbox.length ? (
+                data.inbox.map((item) => (
+                  <FeedItem
+                    busy={busyRequestId === item.id}
+                    item={item}
+                    key={item.id}
+                    selected={selectedEventId === item.id}
+                    onAction={handleInboxAction}
+                    onSelect={handleSelectEvent}
+                  />
+                ))
+              ) : (
+                <div className="empty-state">
+                  <FiWifi aria-hidden="true" />
+                  <strong>Listening for role-matched requests</strong>
+                  <span>Cloud API and nearby pods can post directly into this coordinator.</span>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <div className="right-stack">
+            <TaskList tasks={data.tasks} onTaskChange={handleTaskChange} />
+            <IncidentList
+              incidents={data.incidents}
+              selectedEventId={selectedEventId}
+              onSelectIncident={handleSelectIncident}
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "resources" ? (
+        <section className="main-grid">
+          <section className="panel metrics-panel">
+            <div className="panel-heading">
+              <span className="section-icon" aria-hidden="true">
+                <FiDatabase />
+              </span>
+              <div>
+                <p>Live Metrics</p>
+                <h2>Editable cloud-synced fields</h2>
+              </div>
+            </div>
+            <div className="metrics-grid">
+              {data.fields.map((field) => (
+                <EditableMetric
+                  field={field}
+                  key={field.id}
+                  pending={pendingFields[field.id]}
+                  onChange={handleFieldChange}
+                />
+              ))}
+            </div>
+          </section>
+
+          <NetworkCard data={data} busyPath={busyPath} onTogglePath={handleTogglePath} />
+        </section>
+      ) : null}
+
+      {activeTab === "history" ? (
+        <section className="panel history-panel">
+          <div className="panel-heading">
+            <span className="section-icon" aria-hidden="true">
+              <FiClock />
+            </span>
+            <div>
+              <p>Past History</p>
+              <h2>Handled requests — reported to Command Center</h2>
+            </div>
+          </div>
+          <HistoryList history={data.history || []} />
+        </section>
+      ) : null}
+
+      {toasts.length > 0 ? (
+        <div className="toast-stack" role="status" aria-live="polite">
+          {toasts.map((toast) => (
+            <button
+              className={classNames("toast", toast.severity)}
+              key={toast.id}
+              type="button"
+              onClick={() => {
+                openTab("intake");
+                setToasts((current) => current.filter((item) => item.id !== toast.id));
+              }}
+            >
+              <strong>
+                <FiInbox aria-hidden="true" />
+                {toast.title}
+              </strong>
+              <span>{toast.message}</span>
+              <small>via {toast.transport} — click to open</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </main>
   );
 }

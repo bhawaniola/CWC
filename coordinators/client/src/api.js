@@ -43,6 +43,23 @@ export async function updateCoordinatorTask(taskId, status) {
   return result;
 }
 
+export async function updateInboxRequest(requestId, status, note = "") {
+  const response = await fetch(`/api/coordinator/inbox/${encodeURIComponent(requestId)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ status, note })
+  });
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(result.message || "Unable to update inbox request.");
+  }
+
+  return result;
+}
+
 export async function updateNetworkPath(pathName, enabled) {
   const action = enabled ? "enable" : "disable";
   const response = await fetch(`/api/network/${pathName}/${action}`, {

@@ -98,7 +98,38 @@ function useHashRoute() {
 }
 
 function isCitizenRequest(request) {
-  return request && request.category !== "EARLY-WARNING" && request.category !== "SECURITY";
+  if (!request) return false;
+  // Coordinator lifecycle events (field updates, shortages, resolutions)
+  // belong in the activity feed, not the emergency request list.
+  if (String(request.requestKind || "").startsWith("coordinator-") || request.coordinatorId) return false;
+  return request.category !== "EARLY-WARNING" && request.category !== "SECURITY";
+}
+
+function requestStatus(request) {
+  const resolutions = Array.isArray(request?.resolutions) ? request.resolutions : [];
+  if (resolutions.some((item) => item.status === "resolved")) {
+    return { label: "Resolved", tone: "green" };
+  }
+  if (resolutions.some((item) => item.status === "acknowledged")) {
+    return { label: "Acknowledged", tone: "teal" };
+  }
+  if ((request?.routing?.targets || []).length) {
+    return { label: "Assigned", tone: "blue" };
+  }
+  return { label: "In Progress", tone: "blue" };
+}
+
+function isResolvedRequest(request) {
+  return (Array.isArray(request?.resolutions) ? request.resolutions : []).some(
+    (item) => item.status === "resolved"
+  );
+}
+
+function latestResolutionAt(request) {
+  return (Array.isArray(request?.resolutions) ? request.resolutions : []).reduce(
+    (latest, item) => (item.at && (!latest || item.at > latest) ? item.at : latest),
+    ""
+  );
 }
 
 function upsertById(list, item) {
@@ -467,9 +498,11 @@ function Header({ overview, search, setSearch, searchResults, setRoute }) {
 
       <button className="relative grid h-[42px] w-[42px] shrink-0 place-items-center rounded-full bg-white text-[#52677f]" aria-label="Alerts" onClick={() => setRoute("/alerts")}>
         <Bell size={23} />
-        <span className="absolute right-px top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-brand-red px-1 text-[10px] font-black text-white">
-          {overview?.counts?.alerts || overview?.counts?.critical || 0}
-        </span>
+        {(overview?.counts?.alerts || overview?.counts?.critical || 0) > 0 && (
+          <span className="absolute right-px top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-brand-red px-1 text-[10px] font-black text-white">
+            {overview?.counts?.alerts || overview?.counts?.critical}
+          </span>
+        )}
       </button>
 
       <div className="min-w-[128px] shrink-0 text-right">
@@ -505,11 +538,11 @@ function Sidebar({ route, setRoute, counts, mode }) {
             >
               <Icon size={21} />
               <span>{label}</span>
-              {badge === "requests" && (
-                <em className="ml-auto grid h-[22px] min-w-[22px] place-items-center rounded-full bg-brand-red text-[11px] not-italic text-white">{counts.activeRequests || 0}</em>
+              {badge === "requests" && (counts.activeRequests || 0) > 0 && (
+                <em className="ml-auto grid h-[22px] min-w-[22px] place-items-center rounded-full bg-brand-red text-[11px] not-italic text-white">{counts.activeRequests}</em>
               )}
-              {badge === "alerts" && (
-                <em className="ml-auto grid h-[22px] min-w-[22px] place-items-center rounded-full bg-brand-red text-[11px] not-italic text-white">{counts.alerts || 0}</em>
+              {badge === "alerts" && (counts.alerts || 0) > 0 && (
+                <em className="ml-auto grid h-[22px] min-w-[22px] place-items-center rounded-full bg-brand-red text-[11px] not-italic text-white">{counts.alerts}</em>
               )}
             </button>
           );
@@ -574,7 +607,7 @@ function RequestCard({ request, index }) {
         <span className={`request-rank ${label.toLowerCase()}`}>{index + 1}</span>
         <div>
           <b>{request.name || cap(request.category || "Emergency Request")}</b>
-          <small>{String(request.id || "request").slice(0, 18)}</small>
+          <small>{cap(request.category || "Emergency")} request</small>
         </div>
         <StatusPill request={request} />
       </div>
@@ -582,7 +615,7 @@ function RequestCard({ request, index }) {
       <div className="request-meta-grid">
         <span><MapPin size={15} /> {destination}</span>
         <span><ClipboardList size={15} /> {requestTypes}</span>
-        <span><CheckCircle2 size={15} /> {index % 2 ? "Assigned" : "In progress"}</span>
+        <span><CheckCircle2 size={15} /> {requestStatus(request).label}</span>
         <span><Activity size={15} /> {ago(request.cloudReceivedAt)}</span>
       </div>
     </article>
@@ -767,11 +800,11 @@ function RequestTable({ requests }) {
       <tbody>
         {requests.map((request, index) => (
           <tr key={request.id || index}>
-            <td><b>{String(request.id || "").slice(0, 14)}</b></td>
+            <td><b>#{String(request.id || "").replace(/-/g, "").slice(-6).toUpperCase()}</b></td>
             <td><StatusPill request={request} /></td>
             <td><span className="category-dot">{cap(request.category).slice(0, 1)}</span>{cap(request.category)}</td>
             <td><b>{request.locationName || request.location || request.podName || "Varuna Hills Zone 1"}</b><small>Lat 17.4321 Long 78.3921</small></td>
-            <td><span className="soft-pill blue">{index % 2 ? "Assigned" : "In Progress"}</span></td>
+            <td><span className={`soft-pill ${requestStatus(request).tone}`}>{requestStatus(request).label}</span></td>
             <td><CheckCircle2 size={17} className="ok-icon" /> Synced</td>
             <td>{ago(request.cloudReceivedAt)}</td>
           </tr>
@@ -798,16 +831,21 @@ function buildDashboardLogs(overview, requests) {
   });
 
   deliveries.forEach((delivery) => {
+    const settled = ["delivered", "resolved"].includes(delivery.status);
     logs.push({
       id: `delivery-${delivery.id}`,
       title: `${delivery.targetCoordinatorName || "Coordinator"} ${delivery.status || "queued"}`,
       detail:
-        delivery.status === "delivered"
-          ? `Sent via ${delivery.deliveredVia || "network"}${delivery.deliveredLink ? ` / ${delivery.deliveredLink}` : ""}`
-          : delivery.lastReason || "Waiting for satellite or matching tower",
+        delivery.status === "resolved"
+          ? delivery.lastReason || "Coordinator resolved this request in the field"
+          : delivery.status === "delivered"
+            ? `Coordinator confirmed receipt via ${delivery.deliveredVia || "network"}${delivery.deliveredLink ? ` / ${delivery.deliveredLink}` : ""}`
+            : delivery.status === "rejected"
+              ? delivery.lastReason || "Coordinator declined: request does not match its role"
+              : delivery.lastReason || "Waiting for satellite or matching tower",
       at: delivery.updatedAt || delivery.deliveredAt || delivery.queuedAt,
-      Icon: delivery.status === "delivered" ? CheckCircle2 : WifiOff,
-      tone: delivery.status === "delivered" ? "teal" : "orange"
+      Icon: settled ? CheckCircle2 : delivery.status === "rejected" ? AlertTriangle : WifiOff,
+      tone: settled ? "teal" : delivery.status === "rejected" ? "red" : "orange"
     });
   });
 
@@ -885,7 +923,7 @@ function ActivityFeed({ logs, setRoute }) {
 function Dashboard({ overview, requests, setRoute }) {
   const [fullMapOpen, setFullMapOpen] = useState(false);
   const mode = deriveMode(overview.infra);
-  const displayRequests = requests.slice(0, 2);
+  const displayRequests = requests.filter((request) => !isResolvedRequest(request)).slice(0, 4);
   const activityLogs = buildDashboardLogs(overview, requests);
   const activeLastHour = overview.counts.activeRequestsLastHour ?? requests.filter(isLastHour).length;
   const criticalLastHour =
@@ -902,15 +940,16 @@ function Dashboard({ overview, requests, setRoute }) {
       </div>
 
       <div className="dashboard-grid">
-        <RecentRequests requests={displayRequests} total={overview.counts.activeRequests} setRoute={setRoute} />
+        <div className="dashboard-col">
+          <RecentRequests requests={displayRequests} total={overview.counts.activeRequests} setRoute={setRoute} />
+          <SensorFeedPanel overview={overview} setRoute={setRoute} />
+        </div>
 
-        <NetworkQuickPanel overview={overview} mode={mode} setRoute={setRoute} />
-
-        <SensorFeedPanel overview={overview} setRoute={setRoute} />
-
-        <MapPanel onViewFullMap={() => setFullMapOpen(true)} />
-
-        <ActivityFeed logs={activityLogs} setRoute={setRoute} />
+        <div className="dashboard-col">
+          <NetworkQuickPanel overview={overview} mode={mode} setRoute={setRoute} />
+          <MapPanel onViewFullMap={() => setFullMapOpen(true)} />
+          <ActivityFeed logs={activityLogs} setRoute={setRoute} />
+        </div>
       </div>
 
       {fullMapOpen && (
@@ -1020,22 +1059,31 @@ function deliveryReason(delivery) {
 
 function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, focusRequestId, onRequestSeen }) {
   const [activeFilter, setActiveFilter] = useState("all");
+  const [view, setView] = useState("active");
   const sortedRequests = [...requests].sort((left, right) => requestTimeMs(right) - requestTimeMs(left));
+  const openRequests = sortedRequests.filter((request) => !isResolvedRequest(request));
+  const historyRequests = sortedRequests.filter(isResolvedRequest);
+  const viewRequests = view === "history" ? historyRequests : openRequests;
   const filterCounts = requestFilters.reduce((counts, filter) => {
     counts[filter.key] =
       filter.key === "all"
-        ? sortedRequests.length
-        : sortedRequests.filter((request) => requestFilterKey(request) === filter.key).length;
+        ? viewRequests.length
+        : viewRequests.filter((request) => requestFilterKey(request) === filter.key).length;
     return counts;
   }, {});
   const shown =
     activeFilter === "all"
-      ? sortedRequests
-      : sortedRequests.filter((request) => requestFilterKey(request) === activeFilter);
+      ? viewRequests
+      : viewRequests.filter((request) => requestFilterKey(request) === activeFilter);
 
   useEffect(() => {
     if (!focusRequestId) return;
     setActiveFilter("all");
+    setView(
+      requests.some((request) => request.id === focusRequestId && isResolvedRequest(request))
+        ? "history"
+        : "active"
+    );
     const scrollTimer = setTimeout(() => {
       const target = document.getElementById(`request-${focusRequestId}`);
       if (target) {
@@ -1053,6 +1101,18 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
     <div className="page requests-only-page">
       <section className="panel requests-workbench">
         <div className="request-toolbar">
+          <div className="view-switch">
+            <button className={view === "active" ? "active" : ""} onClick={() => setView("active")}>
+              <Siren size={16} />
+              Active
+              <b>{openRequests.length}</b>
+            </button>
+            <button className={view === "history" ? "active" : ""} onClick={() => setView("history")}>
+              <CheckCircle2 size={16} />
+              Past history
+              <b>{historyRequests.length}</b>
+            </button>
+          </div>
           <button className="ghost-button" onClick={retryDeliveries}>Retry queued deliveries</button>
         </div>
         <div className="request-filter-bar">
@@ -1072,21 +1132,32 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
         <div className="request-board">
           {shown.length ? shown.map((request) => {
             const requestDeliveries = deliveryForRequest(deliveries, request);
-            const delivered = requestDeliveries.filter((delivery) => delivery.status === "delivered").length;
+            const delivered = requestDeliveries.filter((delivery) =>
+              ["delivered", "resolved"].includes(delivery.status)
+            ).length;
             const total = requestDeliveries.length;
             const classification = request.routing?.classification;
             const departmentLabels = classification?.departments?.map((item) => item.label) || request.requestTypes || [];
             const targets = request.routing?.targets || [];
 
+            const lifecycle = requestStatus(request);
+
             return (
-              <article className="request-detail-card" id={`request-${request.id}`} key={request.id}>
+              <article
+                className={`request-detail-card ${isResolvedRequest(request) ? "resolved" : ""}`}
+                id={`request-${request.id}`}
+                key={request.id}
+              >
                 <header>
                   <div>
-                    <span className="req-id">{String(request.id || "").slice(0, 22)}</span>
+                    <span className="req-id">#{String(request.id || "").replace(/-/g, "").slice(-6).toUpperCase()}</span>
                     <h3>{request.name || cap(request.category || "Emergency Request")}</h3>
                     <p>{request.message || "Emergency request routed to coordinators."}</p>
                   </div>
-                  <StatusPill request={request} />
+                  <div className="request-pills">
+                    <span className={`soft-pill ${lifecycle.tone}`}>{lifecycle.label}</span>
+                    <StatusPill request={request} />
+                  </div>
                 </header>
 
                 <div className="request-detail-grid">
@@ -1115,7 +1186,11 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
                     return (
                       <span className={`coordinator-chip ${delivery.status}`} key={delivery.id}>
                         <b>{delivery.targetCoordinatorName || delivery.targetCoordinatorId}</b>
-                        <em>{delivery.status || "planned"}</em>
+                        <em>
+                          {delivery.resolutionStatus === "acknowledged" && delivery.status !== "resolved"
+                            ? "acknowledged"
+                            : delivery.status || "planned"}
+                        </em>
                         <small>{deliveryTransport(delivery)}</small>
                         <i>{routeLabelsForTarget({ towers: delivery.targetTowers || target.towers })}</i>
                         {deliveryReason(delivery) ? <strong>{deliveryReason(delivery)}</strong> : null}
@@ -1131,7 +1206,13 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
                 </div>
 
                 <footer>
-                  <span>Received {ago(request.cloudReceivedAt)}</span>
+                  <span>
+                    Received {ago(request.cloudReceivedAt)}
+                    {request.resolutionSummary ? ` · ${request.resolutionSummary}` : ""}
+                    {isResolvedRequest(request) && latestResolutionAt(request)
+                      ? ` · closed ${ago(latestResolutionAt(request))}`
+                      : ""}
+                  </span>
                   <button onClick={() => deleteRequest(request.id)}>Delete</button>
                 </footer>
               </article>
@@ -1776,7 +1857,8 @@ function App() {
       sensorSummary: null
     };
     const citizenRequests = requests.length ? requests : (base.requests || []).filter(isCitizenRequest);
-    const recentRequests = citizenRequests.filter(isLastHour);
+    const openRequests = citizenRequests.filter((request) => !isResolvedRequest(request));
+    const recentRequests = openRequests.filter(isLastHour);
     return {
       ...base,
       isLoading: Boolean(base.isLoading),
@@ -1784,11 +1866,14 @@ function App() {
       coordinatorDeliveries: deliveries,
       counts: {
         ...base.counts,
-        activeRequests: citizenRequests.length,
+        activeRequests: openRequests.length,
+        resolvedRequests: citizenRequests.length - openRequests.length,
         activeRequestsLastHour: recentRequests.length,
-        critical: citizenRequests.filter(isCriticalRequest).length,
+        critical: openRequests.filter(isCriticalRequest).length,
         criticalLastHour: recentRequests.filter(isCriticalRequest).length,
-        queuedCoordinatorDeliveries: deliveries.filter((delivery) => delivery.status !== "delivered").length,
+        queuedCoordinatorDeliveries: deliveries.filter(
+          (delivery) => !["delivered", "resolved", "rejected"].includes(delivery.status)
+        ).length,
         alerts: (base.counts.alerts || 0) + unseenRequestLogs.length
       }
     };

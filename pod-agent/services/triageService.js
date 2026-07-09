@@ -8,6 +8,16 @@ const CRITICAL_KEYWORDS = [
   "heart attack",
   "stroke",
   "cannot breathe",
+  // "breath" is a substring of breathe/breathing/breathless, so one entry
+  // covers "can't breathe", "breathing difficulty", "breathless", etc.
+  "breath",
+  "oxygen",
+  "suffocat",
+  "drowning",
+  "collapse",
+  "electrocut",
+  "snake bite",
+  "seizure",
   "बेहोश",
   "खून",
   "इंसुलिन",

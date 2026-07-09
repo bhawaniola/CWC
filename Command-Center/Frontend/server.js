@@ -201,14 +201,21 @@ app.get("/api/overview", async (req, res) => {
   const coordinatorDeliveries = deliveriesPayload?.data || [];
 
   const citizenRequests = requests.filter(
-    (r) => r.category !== "EARLY-WARNING" && r.category !== "SECURITY"
+    (r) =>
+      r.category !== "EARLY-WARNING" &&
+      r.category !== "SECURITY" &&
+      !String(r.requestKind || "").startsWith("coordinator-") &&
+      !r.coordinatorId
   );
   const online = pods.filter((p) => p.reachable && p.mode !== "offline");
   const islandCount = pods.filter((p) => p.mode === "island").length;
   const totalQueued = pods.reduce((sum, p) => sum + (p.queuedRequests || 0), 0);
 
-  const recentRequests = citizenRequests.filter(isLastHour);
-  const critical = citizenRequests.filter(isCriticalRequest).length;
+  const openRequests = citizenRequests.filter(
+    (r) => !(Array.isArray(r.resolutions) ? r.resolutions : []).some((item) => item.status === "resolved")
+  );
+  const recentRequests = openRequests.filter(isLastHour);
+  const critical = openRequests.filter(isCriticalRequest).length;
   const criticalLastHour = recentRequests.filter(isCriticalRequest).length;
 
   res.json({
@@ -218,14 +225,17 @@ app.get("/api/overview", async (req, res) => {
       cloudUp: Boolean(cloud?.data),
       mode: islandCount > 0 ? "ISLAND MODE" : online.length === pods.length ? "CLOUD MODE" : "MIXED",
       counts: {
-        activeRequests: citizenRequests.length,
+        activeRequests: openRequests.length,
+        resolvedRequests: citizenRequests.length - openRequests.length,
         activeRequestsLastHour: recentRequests.length,
         critical,
         criticalLastHour,
         podsOnline: online.length,
         podsTotal: pods.length,
         queued: totalQueued,
-        queuedCoordinatorDeliveries: coordinatorDeliveries.filter((delivery) => delivery.status !== "delivered").length,
+        queuedCoordinatorDeliveries: coordinatorDeliveries.filter(
+          (delivery) => !["delivered", "resolved", "rejected"].includes(delivery.status)
+        ).length,
         islandPods: islandCount,
         alerts: alerts.length
       },
