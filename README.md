@@ -251,6 +251,32 @@ Guard rails (same "enhancer, never gatekeeper" rule as the AI):
 Endpoints: `GET /api/webex/health`, `POST /api/webex/test` (rehearsal ping).
 The `.env` file is gitignored — the token must never reach GitHub.
 
+## Splunk Forwarding — enterprise after-action log
+
+Every cloud event (SOS stored, routing decision, delivery receipt, shortage,
+early warning, AI upgrade, resolution) can stream to **Splunk** via the
+standard HTTP Event Collector, giving an enterprise deployment full
+after-action searchability: `source="sanjeevani" severity>=8` shows every
+critical case with its pod, transport, and routed coordinators on a timeline.
+
+Off by default — the demo stack runs with zero Splunk footprint. To enable,
+set two lines in `.env` and restart `cloud-api`:
+
+```text
+SPLUNK_HEC_URL=http://host.docker.internal:8088
+SPLUNK_HEC_TOKEN=<your HEC token>
+```
+
+Same guard rails as Webex ("enhancer, never gatekeeper"): events are batched
+and fire-and-forget — a dead or slow Splunk costs one throttled log line,
+never a delayed SOS. Verified without the real (heavy) Splunk by
+`integrations/splunk_test.py` (8/8 checks against `mock_splunk.js`, a
+faithful HEC endpoint), including the "Splunk down, SOS unaffected" case:
+
+```powershell
+py -3 integrations/splunk_test.py
+```
+
 ## 10-Pod Topology
 
 ```text
@@ -484,6 +510,19 @@ py -3 integrations/integration_test.py
     slurring, face drooping") — the phone buzzes ~15s later with
     "🤖 caught by AI triage" and the model's reason. Spike a sensor and the
     ⚠️ early-warning alert lands too.
+17. **Live field telemetry, end to end**: open the Command Center Sensors
+    page — every reading is live from the pods' Meraki stations (the pod
+    computes NORMAL/WATCH/CRITICAL from the same hazard-pack thresholds
+    that fire alerts, so no screen can disagree with the field). Spike
+    POD-06's water level and watch its row climb to WATCH, then CRITICAL;
+    the Flood coordinator's dashboard shows the same rows for its covered
+    pods. Telemetry rides the same satellite → cellular → mesh ladder as
+    SOS traffic — fail the uplinks and the readings freeze with honest
+    timestamps instead of pretending. Let the water recede below 120 cm
+    and the hazard pack **re-arms itself**: a second flood alerts again,
+    no manual reset — and a receding river can never re-fire a "rising"
+    warning, because a trend only fires when the latest reading is the
+    peak of its window.
 
 ## Stop And Reset
 

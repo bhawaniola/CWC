@@ -592,6 +592,27 @@ app.post("/api/sensors", async (req, res) => {
     const identity = connectivity.getPodIdentity();
     const result = hazardPacks.recordSensorReading(identity, req.body || {});
 
+    for (const packName of result.rearmed || []) {
+      console.log(
+        `[pod-agent] ${identity.podId} hazard pack "${packName}" re-armed: ${result.reading.sensor} back at safe level ${result.reading.value}`
+      );
+    }
+
+    // Live telemetry for the Command Center and coordinators: queue the pod's
+    // full sensor snapshot up the same satellite -> cellular -> mesh ladder as
+    // SOS traffic. Stable id per pod, so the offline queue holds at most one
+    // pending snapshot and the background 5s sync carries the latest reading —
+    // telemetry never jumps the queue ahead of an SOS.
+    localQueue.enqueue({
+      id: `sensor-state-${identity.podId}`,
+      requestKind: "pod-sensor-update",
+      podId: identity.podId,
+      podName: identity.podName,
+      region: identity.region,
+      readings: hazardPacks.buildSensorTelemetry(identity),
+      createdAt: new Date().toISOString()
+    });
+
     for (const alert of result.fired) {
       try {
         await connectivity.sendPodAlert({
@@ -812,7 +833,11 @@ function acceptMeshInbox(req, res) {
   );
 
   const queuedAtRelay = queueLocal(relayedRequest, "queued-at-mesh-inbox");
-  notifyMatchingCoordinators(queuedAtRelay, relayedRequest.network, "mesh-inbox");
+  // Telemetry snapshots only hop toward the cloud — they are not SOS cards
+  // and must never land in a coordinator's inbox.
+  if (relayedRequest.requestKind !== "pod-sensor-update") {
+    notifyMatchingCoordinators(queuedAtRelay, relayedRequest.network, "mesh-inbox");
+  }
 
   res.status(202).json({
     success: true,

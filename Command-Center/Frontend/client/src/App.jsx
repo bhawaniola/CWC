@@ -6,6 +6,8 @@ import {
   Bell,
   Boxes,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   ClipboardList,
   Cloud,
   Database,
@@ -40,26 +42,6 @@ const navItems = [
   { path: "/resources", label: "Resources", Icon: Home },
   { path: "/volunteers", label: "Volunteers", Icon: Users },
   { path: "/alerts", label: "Alerts", Icon: Bell, badge: "alerts" }
-];
-
-const dummyLocations = [
-  "Varuna Hills Zone 1",
-  "Kothapalli Zone 3",
-  "Mangalagiri Zone 2",
-  "Nandigama Relief Hub",
-  "Budameru River Basin",
-  "Shelter Camp B",
-  "Pod 03 Medical Camp",
-  "Zone 2 SAR Route"
-];
-
-const dummyResources = [
-  "Water stock 18450 litres",
-  "Medical kits 324",
-  "Shelter capacity 1250",
-  "Active volunteers 128",
-  "Insulin stock low",
-  "Boat routing flood rescue"
 ];
 
 const metricAssets = {
@@ -790,6 +772,7 @@ function RequestCard({ request, index }) {
               ? `AI upgraded ${request.aiTriage.previousSeverity} → ${request.aiTriage.severity}`
               : "AI confirmed"}
           </b>
+          {" — "}
           {request.aiTriage.reason}
         </p>
       )}
@@ -1071,7 +1054,10 @@ function buildDashboardLogs(overview, requests) {
 
   return logs
     .filter((log) => log.at)
-    .sort((left, right) => new Date(right.at).getTime() - new Date(left.at).getTime());
+    .sort((left, right) => new Date(right.at).getTime() - new Date(left.at).getTime())
+    // The dashboard shows a pulse, not an archive: freshest 8, and the
+    // "Open alerts" button leads to the full log.
+    .slice(0, 8);
 }
 
 function ActivityFeed({ logs, setRoute }) {
@@ -1302,6 +1288,19 @@ function deliveryReason(delivery) {
 function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, focusRequestId, onRequestSeen }) {
   const [activeFilter, setActiveFilter] = useState("all");
   const [view, setView] = useState("active");
+  // Cards open collapsed: the board reads as a scannable queue, and the
+  // routing/receipt detail lives behind a per-card Details toggle.
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const toggleExpanded = (id) =>
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   const sortedRequests = [...requests].sort((left, right) => requestTimeMs(right) - requestTimeMs(left));
   const openRequests = sortedRequests.filter((request) => !isResolvedRequest(request));
   const historyRequests = sortedRequests.filter(isResolvedRequest);
@@ -1333,6 +1332,8 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
         target.classList.add("focus-pulse");
         setTimeout(() => target.classList.remove("focus-pulse"), 1800);
       }
+      // A card someone jumped to from an alert should arrive fully open.
+      setExpandedIds((prev) => new Set(prev).add(focusRequestId));
       onRequestSeen?.(focusRequestId);
     }, 80);
 
@@ -1383,10 +1384,11 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
             const targets = request.routing?.targets || [];
 
             const lifecycle = requestStatus(request);
+            const expanded = expandedIds.has(request.id);
 
             return (
               <article
-                className={`request-detail-card ${isResolvedRequest(request) ? "resolved" : ""}`}
+                className={`request-detail-card ${isResolvedRequest(request) ? "resolved" : ""} ${expanded ? "" : "collapsed"}`}
                 id={`request-${request.id}`}
                 key={request.id}
               >
@@ -1394,7 +1396,7 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
                   <div>
                     <span className="req-id">#{String(request.id || "").replace(/-/g, "").slice(-6).toUpperCase()}</span>
                     <h3>{request.name || cap(request.category || "Emergency Request")}</h3>
-                    <p>{request.message || "Emergency request routed to coordinators."}</p>
+                    <p className={expanded ? "" : "clamped"}>{request.message || "Emergency request routed to coordinators."}</p>
                   </div>
                   <div className="request-pills">
                     <span className={`soft-pill ${lifecycle.tone}`}>{lifecycle.label}</span>
@@ -1402,25 +1404,40 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
                   </div>
                 </header>
 
-                <div className="request-detail-grid">
-                  <div><span>Filter Type</span><b>{cap(requestFilterKey(request))}</b></div>
-                  <div><span>Location</span><b>{request.locationName || request.location || "Varuna Hills"}</b></div>
-                  <div><span>Departments</span><b>{departmentLabels.join(", ") || "Auto triage"}</b></div>
-                  <div><span>Coordinator Delivery</span><b>{delivered} / {total || 0} sent</b></div>
+                <div className="request-summary-line">
+                  <span>
+                    {cap(requestFilterKey(request))} · {request.locationName || request.location || "Varuna Hills"} ·{" "}
+                    {delivered}/{total || 0} delivered · received {ago(request.cloudReceivedAt)}
+                  </span>
+                  <button className="details-toggle" onClick={() => toggleExpanded(request.id)}>
+                    {expanded ? "Hide details" : "Details"}
+                    {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
                 </div>
 
-                <div className="routing-summary">
-                  <div>
-                    <span>Routing logic</span>
-                    <b>{classification?.summary || request.triage?.reason || "Classified from category and emergency text"}</b>
-                    <small>Satellite first, then matching cellular tower, otherwise stored at Command Center queue.</small>
-                  </div>
-                  <div>
-                    <span>Target coordinators</span>
-                    <b>{targets.map((target) => target.name).join(", ") || "Waiting for backend route"}</b>
-                    <small>{targets.length ? "Matched from department rules and tower coverage." : "Route will appear when the request is classified."}</small>
-                  </div>
-                </div>
+                {expanded ? (
+                  <>
+                    <div className="request-detail-grid">
+                      <div><span>Filter Type</span><b>{cap(requestFilterKey(request))}</b></div>
+                      <div><span>Location</span><b>{request.locationName || request.location || "Varuna Hills"}</b></div>
+                      <div><span>Departments</span><b>{departmentLabels.join(", ") || "Auto triage"}</b></div>
+                      <div><span>Coordinator Delivery</span><b>{delivered} / {total || 0} sent</b></div>
+                    </div>
+
+                    <div className="routing-summary">
+                      <div>
+                        <span>Routing logic</span>
+                        <b>{classification?.summary || request.triage?.reason || "Classified from category and emergency text"}</b>
+                        <small>Satellite first, then matching cellular tower, otherwise stored at Command Center queue.</small>
+                      </div>
+                      <div>
+                        <span>Target coordinators</span>
+                        <b>{targets.map((target) => target.name).join(", ") || "Waiting for backend route"}</b>
+                        <small>{targets.length ? "Matched from department rules and tower coverage." : "Route will appear when the request is classified."}</small>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
 
                 {request.routing?.saturatedRoles?.length ? (
                   <div className="saturation-note">
@@ -1439,7 +1456,7 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
                   </div>
                 ) : null}
 
-                {request.aiTriage ? (
+                {request.aiTriage && (expanded || request.aiTriage.upgraded) ? (
                   <div
                     className={`ai-verdict ${
                       request.aiTriage.status === "complete"
@@ -1473,41 +1490,45 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
                   </div>
                 ) : null}
 
-                <div className="coordinator-status-list">
-                  {requestDeliveries.length ? requestDeliveries.map((delivery) => {
-                    const target = targets.find((item) => item.id === delivery.targetCoordinatorId) || {};
-                    return (
-                      <span className={`coordinator-chip ${delivery.status}`} key={delivery.id}>
-                        <b>{delivery.targetCoordinatorName || delivery.targetCoordinatorId}</b>
-                        <em>
-                          {delivery.resolutionStatus === "acknowledged" && delivery.status !== "resolved"
-                            ? "acknowledged"
-                            : delivery.status || "planned"}
-                        </em>
-                        <small>{deliveryTransport(delivery)}</small>
-                        <i>{routeLabelsForTarget({ towers: delivery.targetTowers || target.towers })}</i>
-                        {deliveryReason(delivery) ? <strong>{deliveryReason(delivery)}</strong> : null}
-                      </span>
-                    );
-                  }) : (
-                    <span className="coordinator-chip planned">
-                      <b>Routing pending</b>
-                      <em>planned</em>
-                      <small>auto</small>
-                    </span>
-                  )}
-                </div>
+                {expanded ? (
+                  <>
+                    <div className="coordinator-status-list">
+                      {requestDeliveries.length ? requestDeliveries.map((delivery) => {
+                        const target = targets.find((item) => item.id === delivery.targetCoordinatorId) || {};
+                        return (
+                          <span className={`coordinator-chip ${delivery.status}`} key={delivery.id}>
+                            <b>{delivery.targetCoordinatorName || delivery.targetCoordinatorId}</b>
+                            <em>
+                              {delivery.resolutionStatus === "acknowledged" && delivery.status !== "resolved"
+                                ? "acknowledged"
+                                : delivery.status || "planned"}
+                            </em>
+                            <small>{deliveryTransport(delivery)}</small>
+                            <i>{routeLabelsForTarget({ towers: delivery.targetTowers || target.towers })}</i>
+                            {deliveryReason(delivery) ? <strong>{deliveryReason(delivery)}</strong> : null}
+                          </span>
+                        );
+                      }) : (
+                        <span className="coordinator-chip planned">
+                          <b>Routing pending</b>
+                          <em>planned</em>
+                          <small>auto</small>
+                        </span>
+                      )}
+                    </div>
 
-                <footer>
-                  <span>
-                    Received {ago(request.cloudReceivedAt)}
-                    {request.resolutionSummary ? ` · ${request.resolutionSummary}` : ""}
-                    {isResolvedRequest(request) && latestResolutionAt(request)
-                      ? ` · closed ${ago(latestResolutionAt(request))}`
-                      : ""}
-                  </span>
-                  <button onClick={() => deleteRequest(request.id)}>Delete</button>
-                </footer>
+                    <footer>
+                      <span>
+                        Received {ago(request.cloudReceivedAt)}
+                        {request.resolutionSummary ? ` · ${request.resolutionSummary}` : ""}
+                        {isResolvedRequest(request) && latestResolutionAt(request)
+                          ? ` · closed ${ago(latestResolutionAt(request))}`
+                          : ""}
+                      </span>
+                      <button onClick={() => deleteRequest(request.id)}>Delete</button>
+                    </footer>
+                  </>
+                ) : null}
               </article>
             );
           }) : (
@@ -1996,34 +2017,54 @@ function ResourceStockRow({ field }) {
   );
 }
 
+function ResourceCoordinatorCard({ entry }) {
+  const [showAll, setShowAll] = useState(false);
+  const { Icon, tone } = resourceRolePresentation(entry.role);
+  const updatedAt = latestFieldUpdateAt(entry);
+  // Shortage-flagged rows sort first so collapsing can never hide a problem.
+  const fields = [...(entry.fields || [])].sort(
+    (left, right) => (right.shortageLevel ? 1 : 0) - (left.shortageLevel ? 1 : 0)
+  );
+  const visible = showAll ? fields : fields.slice(0, 3);
+  const hidden = fields.length - visible.length;
+
+  return (
+    <article className="resource-coordinator-card">
+      <header>
+        <IconTile Icon={Icon} tone={tone} />
+        <div>
+          <b>{entry.coordinatorName}</b>
+          <span>
+            {entry.roleLabel || cap(entry.role || "coordinator")}
+            {updatedAt ? ` · updated ${ago(updatedAt)}` : ""}
+          </span>
+        </div>
+      </header>
+      {entry.reported && fields.length ? (
+        <>
+          {visible.map((field) => <ResourceStockRow field={field} key={field.id} />)}
+          {fields.length > 3 ? (
+            <button className="details-toggle subtle" onClick={() => setShowAll((prev) => !prev)}>
+              {showAll ? "Show less" : `Show ${hidden} more`}
+              {showAll ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <p className="resource-empty-note">Awaiting first stock report from this coordinator.</p>
+      )}
+    </article>
+  );
+}
+
 function ResourceCoordinatorGrid({ groups }) {
   return (
     <section className="panel resource-coordinator-panel">
       <div className="panel-head"><h3>Coordinator Resource Map</h3><span>{groups.length} coordinators</span></div>
       <div className="resource-coordinator-grid">
-        {groups.map((entry) => {
-          const { Icon, tone } = resourceRolePresentation(entry.role);
-          const updatedAt = latestFieldUpdateAt(entry);
-          return (
-            <article className="resource-coordinator-card" key={entry.coordinatorId}>
-              <header>
-                <IconTile Icon={Icon} tone={tone} />
-                <div>
-                  <b>{entry.coordinatorName}</b>
-                  <span>
-                    {entry.roleLabel || cap(entry.role || "coordinator")}
-                    {updatedAt ? ` · updated ${ago(updatedAt)}` : ""}
-                  </span>
-                </div>
-              </header>
-              {entry.reported && (entry.fields || []).length ? (
-                entry.fields.map((field) => <ResourceStockRow field={field} key={field.id} />)
-              ) : (
-                <p className="resource-empty-note">Awaiting first stock report from this coordinator.</p>
-              )}
-            </article>
-          );
-        })}
+        {groups.map((entry) => (
+          <ResourceCoordinatorCard entry={entry} key={entry.coordinatorId} />
+        ))}
       </div>
     </section>
   );
@@ -2322,9 +2363,9 @@ function App() {
       detail: `${sensorValue(sensor)} ${sensor.locationName || ""} ${sensor.status || ""}`,
       route: "/sensors"
     }));
-    const locationItems = dummyLocations.map((location) => ({ id: location, type: "Location", title: location, detail: "Operational map location", route: "/dashboard" }));
-    const resourceItems = dummyResources.map((resource) => ({ id: resource, type: "Resource", title: resource, detail: "Relief operations data", route: "/resources" }));
-    return [...podItems, ...requestItems, ...sensorItems, ...locationItems, ...resourceItems].filter((item) => `${item.title} ${item.detail} ${item.type}`.toLowerCase().includes(q));
+    // Search stays honest: only live pods, requests, and sensor readings —
+    // no canned location/resource strings that nothing on a page backs up.
+    return [...podItems, ...requestItems, ...sensorItems].filter((item) => `${item.title} ${item.detail} ${item.type}`.toLowerCase().includes(q));
   }, [search, derivedOverview, displayRequests]);
 
   const deleteRequest = async (id) => {

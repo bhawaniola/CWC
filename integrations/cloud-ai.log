@@ -4,7 +4,7 @@
 [cloud-api][mongodb][demo-medical-001] request not saved to MongoDB; memory fallback active
 [cloud-api][socket][demo-medical-001] emitted request:created to command-center frontend
 [cloud-api] received demo-medical-001 from POD-03 via unknown
-[cloud-api] payload {"id":"demo-medical-001","podId":"POD-03","podName":"Pod 3","category":"Medical","location":"Kothapalli Relief Street","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T08:05:55.825Z"}
+[cloud-api] payload {"id":"demo-medical-001","podId":"POD-03","podName":"Pod 3","category":"Medical","location":"Kothapalli Relief Street","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T17:58:04.238Z"}
 [cloud-api][routing][demo-medical-001] identified as Hospital; targets=Hospital1, Hospital2
 [cloud-api][socket][demo-medical-001:HOSPITAL-01] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][demo-medical-001:HOSPITAL-02] emitted coordinator-delivery:updated to command-center frontend
@@ -13,7 +13,7 @@
 [cloud-api][mongodb][demo-rescue-001] request not saved to MongoDB; memory fallback active
 [cloud-api][socket][demo-rescue-001] emitted request:created to command-center frontend
 [cloud-api] received demo-rescue-001 from POD-06 via unknown
-[cloud-api] payload {"id":"demo-rescue-001","podId":"POD-06","podName":"Pod 6","category":"Rescue","location":"Subiya River eastern bridge","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T08:05:56.872Z"}
+[cloud-api] payload {"id":"demo-rescue-001","podId":"POD-06","podName":"Pod 6","category":"Rescue","location":"Subiya River eastern bridge","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T17:58:05.279Z"}
 [cloud-api][routing][demo-rescue-001] identified as Flood Rescue, Shelter, Workforce; targets=FloodRescueDept, ShelterCampA, ShelterCampB, ShelterCamp2, WorkForceCamp1, WorkForceCamp2
 [cloud-api][socket][demo-rescue-001:FLOOD-01] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][demo-rescue-001:SHELTER-A] emitted coordinator-delivery:updated to command-center frontend
@@ -26,7 +26,7 @@
 [cloud-api][mongodb][demo-supplies-001] request not saved to MongoDB; memory fallback active
 [cloud-api][socket][demo-supplies-001] emitted request:created to command-center frontend
 [cloud-api] received demo-supplies-001 from POD-05 via unknown
-[cloud-api] payload {"id":"demo-supplies-001","podId":"POD-05","podName":"Pod 5","category":"Supplies","location":"Shelter Camp B","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T08:05:56.877Z"}
+[cloud-api] payload {"id":"demo-supplies-001","podId":"POD-05","podName":"Pod 5","category":"Supplies","location":"Shelter Camp B","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T17:58:05.283Z"}
 [cloud-api][routing][demo-supplies-001] identified as Shelter, Workforce; targets=ShelterCampA, ShelterCampB, ShelterCamp2, WorkForceCamp1, WorkForceCamp2
 [cloud-api][socket][demo-supplies-001:SHELTER-A] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][demo-supplies-001:SHELTER-B] emitted coordinator-delivery:updated to command-center frontend
@@ -38,7 +38,7 @@
 [cloud-api][mongodb][demo-shelter-001] request not saved to MongoDB; memory fallback active
 [cloud-api][socket][demo-shelter-001] emitted request:created to command-center frontend
 [cloud-api] received demo-shelter-001 from POD-08 via unknown
-[cloud-api] payload {"id":"demo-shelter-001","podId":"POD-08","podName":"Pod 8","category":"Shelter","location":"Varuna Hills residential block","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T08:05:56.880Z"}
+[cloud-api] payload {"id":"demo-shelter-001","podId":"POD-08","podName":"Pod 8","category":"Shelter","location":"Varuna Hills residential block","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T17:58:05.287Z"}
 [cloud-api][routing][demo-shelter-001] identified as Shelter, Workforce; targets=ShelterCampA, ShelterCampB, ShelterCamp2, WorkForceCamp1, WorkForceCamp2
 [cloud-api][socket][demo-shelter-001:SHELTER-A] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][demo-shelter-001:SHELTER-B] emitted coordinator-delivery:updated to command-center frontend
@@ -50,13 +50,13 @@
 [cloud-api] listening on 19200 (alert signing: ed25519, 0 pods registered)
 [cloud-api] coordinator routing ready: 9 coordinators, satellite=http://satellite:9100, towers=CELLTOWER-1, CELLTOWER-2
 [cloud-api][socket][demo-medical-001] emitted request:updated to command-center frontend
-[cloud-api][ai][demo-medical-001] confirmed severity 9 (qwen2.5:3b, 36ms): Chest heaviness with dizziness suggests a possible cardiac event.
+[cloud-api][ai][demo-medical-001] confirmed severity 9 (qwen2.5:3b, 31ms): Chest heaviness with dizziness suggests a possible cardiac event.
 [cloud-api][routing][demo-medical-001] identified as Hospital; targets=Hospital1, Hospital2
 [cloud-api][socket][demo-medical-001:HOSPITAL-01] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][demo-medical-001:HOSPITAL-02] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][demo-medical-001] emitted request:updated to command-center frontend
 [cloud-api][socket][demo-rescue-001] emitted request:updated to command-center frontend
-[cloud-api][ai][demo-rescue-001] UPGRADED severity 8 -> 9 (qwen2.5:3b, 33ms): Chest heaviness with dizziness suggests a possible cardiac event.
+[cloud-api][ai][demo-rescue-001] UPGRADED severity 8 -> 9 (qwen2.5:3b, 28ms): Chest heaviness with dizziness suggests a possible cardiac event.
 [cloud-api][routing][demo-rescue-001] identified as Flood Rescue, Shelter, Workforce, Hospital; targets=FloodRescueDept, ShelterCampA, ShelterCampB, ShelterCamp2, WorkForceCamp1, WorkForceCamp2, Hospital1, Hospital2
 [cloud-api][socket][demo-rescue-001:FLOOD-01] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][demo-rescue-001:SHELTER-A] emitted coordinator-delivery:updated to command-center frontend
@@ -68,7 +68,7 @@
 [cloud-api][socket][demo-rescue-001:HOSPITAL-02] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][demo-rescue-001] emitted request:updated to command-center frontend
 [cloud-api][socket][demo-supplies-001] emitted request:updated to command-center frontend
-[cloud-api][ai][demo-supplies-001] UPGRADED severity 6 -> 9 (qwen2.5:3b, 32ms): Chest heaviness with dizziness suggests a possible cardiac event.
+[cloud-api][ai][demo-supplies-001] UPGRADED severity 6 -> 9 (qwen2.5:3b, 26ms): Chest heaviness with dizziness suggests a possible cardiac event.
 [cloud-api][routing][demo-supplies-001] identified as Shelter, Workforce, Hospital; targets=ShelterCampA, ShelterCampB, ShelterCamp2, WorkForceCamp1, WorkForceCamp2, Hospital1, Hospital2
 [cloud-api][socket][demo-supplies-001:SHELTER-A] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][demo-supplies-001:SHELTER-B] emitted coordinator-delivery:updated to command-center frontend
@@ -79,7 +79,7 @@
 [cloud-api][socket][demo-supplies-001:HOSPITAL-02] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][demo-supplies-001] emitted request:updated to command-center frontend
 [cloud-api][socket][demo-shelter-001] emitted request:updated to command-center frontend
-[cloud-api][ai][demo-shelter-001] UPGRADED severity 7 -> 9 (qwen2.5:3b, 31ms): Chest heaviness with dizziness suggests a possible cardiac event.
+[cloud-api][ai][demo-shelter-001] UPGRADED severity 7 -> 9 (qwen2.5:3b, 25ms): Chest heaviness with dizziness suggests a possible cardiac event.
 [cloud-api][routing][demo-shelter-001] identified as Shelter, Workforce, Hospital; targets=ShelterCampA, ShelterCampB, ShelterCamp2, WorkForceCamp1, WorkForceCamp2, Hospital1, Hospital2
 [cloud-api][socket][demo-shelter-001:SHELTER-A] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][demo-shelter-001:SHELTER-B] emitted coordinator-delivery:updated to command-center frontend
@@ -94,14 +94,14 @@
 [cloud-api][mongodb][ai-test-1] request not saved to MongoDB; memory fallback active
 [cloud-api][socket][ai-test-1] emitted request:created to command-center frontend
 [cloud-api] received ai-test-1 from POD-03 via unknown
-[cloud-api] payload {"id":"ai-test-1","podId":"POD-03","podName":"","category":"Other","location":"Kothapalli Zone 3","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T08:05:57.162Z"}
+[cloud-api] payload {"id":"ai-test-1","podId":"POD-03","podName":"","category":"Other","location":"Kothapalli Zone 3","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T17:58:05.454Z"}
 [cloud-api][routing][ai-test-1] identified as Shelter; targets=ShelterCampA, ShelterCampB, ShelterCamp2
 [cloud-api][socket][ai-test-1:SHELTER-A] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][ai-test-1:SHELTER-B] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][ai-test-1:SHELTER-C] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][ai-test-1] emitted request:routed to command-center frontend
 [cloud-api][socket][ai-test-1] emitted request:updated to command-center frontend
-[cloud-api][ai][ai-test-1] UPGRADED severity 3 -> 9 (qwen2.5:3b, 4ms): Chest heaviness with dizziness suggests a possible cardiac event.
+[cloud-api][ai][ai-test-1] UPGRADED severity 3 -> 9 (qwen2.5:3b, 3ms): Chest heaviness with dizziness suggests a possible cardiac event.
 [cloud-api][routing][ai-test-1] identified as Shelter, Hospital; targets=ShelterCampA, ShelterCampB, ShelterCamp2, Hospital1, Hospital2
 [cloud-api][socket][ai-test-1:SHELTER-A] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][ai-test-1:SHELTER-B] emitted coordinator-delivery:updated to command-center frontend
@@ -109,12 +109,12 @@
 [cloud-api][socket][ai-test-1:HOSPITAL-01] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][ai-test-1:HOSPITAL-02] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][ai-test-1] emitted request:updated to command-center frontend
-[cloud-api][ai] SITREP generated in 3ms (5 open requests)
+[cloud-api][ai] SITREP generated in 4ms (5 open requests)
 [cloud-api][backend][ai-test-2] request reached backend from POD-05
 [cloud-api][mongodb][ai-test-2] request not saved to MongoDB; memory fallback active
 [cloud-api][socket][ai-test-2] emitted request:created to command-center frontend
 [cloud-api] received ai-test-2 from POD-05 via unknown
-[cloud-api] payload {"id":"ai-test-2","podId":"POD-05","podName":"","category":"Other","location":"Zone 2","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T08:05:58.258Z"}
+[cloud-api] payload {"id":"ai-test-2","podId":"POD-05","podName":"","category":"Other","location":"Zone 2","language":"","syncStatus":"","forwardedBy":"","linkType":"","relayTrail":[],"cloudReceivedAt":"2026-07-11T17:58:06.529Z"}
 [cloud-api][routing][ai-test-2] identified as Shelter; targets=ShelterCampA, ShelterCampB, ShelterCamp2
 [cloud-api][socket][ai-test-2:SHELTER-A] emitted coordinator-delivery:updated to command-center frontend
 [cloud-api][socket][ai-test-2:SHELTER-B] emitted coordinator-delivery:updated to command-center frontend

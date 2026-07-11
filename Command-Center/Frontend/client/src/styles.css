@@ -2619,3 +2619,63 @@ button {
   font-weight: 600;
   line-height: 1.5;
 }
+
+/* ---- Progressive disclosure: collapsed cards + Details toggles ---- */
+
+.request-summary-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 2px 2px;
+  border-top: 1px dashed var(--line, #e3e9f2);
+  margin-top: 8px;
+}
+
+.request-summary-line > span {
+  color: var(--muted, #64748b);
+  font-size: 12.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line, #dbe4f0);
+  background: transparent;
+  color: var(--muted, #5b6b84);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.details-toggle:hover {
+  background: rgba(100, 130, 180, 0.1);
+  color: var(--ink, #24344d);
+}
+
+.details-toggle.subtle {
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  align-self: flex-start;
+}
+
+.request-detail-card header p.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.request-detail-card.collapsed {
+  padding-bottom: 12px;
+}

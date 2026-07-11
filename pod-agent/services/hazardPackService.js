@@ -10,11 +10,17 @@ const TRIGGER_FILE = path.join(DATA_DIR, "hazard-triggers.json");
 // direct pod -> in-range coordinator notification and the cloud's routing,
 // so a hazard never depends on its alert text happening to contain a
 // role keyword (earthquake/heatwave texts don't).
+//
+// `rearmBelow` is the recovery level: once a pack has fired it stays latched
+// (no alert spam while the value hovers around the threshold), and only when
+// the sensor drops back to safe does the pack re-arm — so a flood that
+// recedes and rises again correctly alerts again.
 const HAZARD_PACKS = [
   {
     name: "flood",
     sensor: "water_level",
     threshold: 150,
+    rearmBelow: 120,
     trendWindow: 5,
     trendMinRise: 25,
     severity: 9,
@@ -26,6 +32,7 @@ const HAZARD_PACKS = [
     name: "earthquake",
     sensor: "shake_g",
     threshold: 0.4,
+    rearmBelow: 0.2,
     severity: 10,
     roles: ["hospital", "workforce"],
     alert:
@@ -35,6 +42,7 @@ const HAZARD_PACKS = [
     name: "heatwave",
     sensor: "temperature",
     threshold: 45,
+    rearmBelow: 40,
     severity: 7,
     roles: ["hospital", "shelter"],
     alert:
@@ -48,6 +56,7 @@ const HAZARD_PACKS = [
     name: "wildfire",
     sensor: "air_quality",
     threshold: 250,
+    rearmBelow: 180,
     trendWindow: 5,
     trendMinRise: 120,
     severity: 8,
@@ -151,6 +160,21 @@ function recordSensorReading(identity, body = {}) {
   writeJson(SENSOR_FILE, readings);
 
   const fired = [];
+  const rearmed = [];
+
+  // Recovery first: a latched pack re-arms once the sensor is back at a safe
+  // level, so the next genuine spike can fire again (a demo re-run or a real
+  // second flood must never be swallowed by a stale latch).
+  for (const pack of HAZARD_PACKS) {
+    if (pack.sensor !== sensor || !triggered[pack.name]) {
+      continue;
+    }
+    const rearmLevel = Number.isFinite(pack.rearmBelow) ? pack.rearmBelow : pack.threshold;
+    if (value <= rearmLevel) {
+      delete triggered[pack.name];
+      rearmed.push(pack.name);
+    }
+  }
 
   for (const pack of HAZARD_PACKS) {
     if (pack.sensor !== sensor || triggered[pack.name]) {
@@ -163,7 +187,11 @@ function recordSensorReading(identity, body = {}) {
     } else if (pack.trendWindow && readings[sensor].length >= pack.trendWindow) {
       const window = readings[sensor].slice(-pack.trendWindow);
       const rise = window[window.length - 1].value - window[0].value;
-      if (rise >= pack.trendMinRise) {
+      // The latest value must be the window's peak: a value RECEDING from a
+      // recent spike still shows a big rise vs 5 readings ago, and a falling
+      // river must never re-fire a "rising" warning right after re-arming.
+      const latestIsPeak = window.every((entry) => entry.value <= window[window.length - 1].value);
+      if (rise >= pack.trendMinRise && latestIsPeak) {
         trigger = `rising ${rise} over last ${pack.trendWindow} readings`;
       }
     }
@@ -202,13 +230,78 @@ function recordSensorReading(identity, body = {}) {
   return {
     reading,
     fired,
+    rearmed,
     readings: readings[sensor],
     triggered
   };
 }
 
+// Display names + Command Center sensor types for the pod's raw metrics.
+const SENSOR_DISPLAY = {
+  water_level: { label: "Water level", type: "water-level" },
+  shake_g: { label: "Ground shake", type: "seismic" },
+  temperature: { label: "Temperature", type: "temperature" },
+  air_quality: { label: "Air quality (PM2.5)", type: "air-quality" }
+};
+
+// Live telemetry rows for the Command Center's Sensors page (and coordinator
+// dashboards): the latest reading per sensor, with the status computed HERE
+// from the same hazard-pack thresholds that fire alerts — the pod is the
+// single source of truth, so no other screen can disagree with it.
+function buildSensorTelemetry(identity) {
+  const readings = getSensorReadings();
+  const triggered = getTriggeredPacks();
+  const rows = [];
+
+  for (const [sensor, entries] of Object.entries(readings)) {
+    if (!Array.isArray(entries) || entries.length === 0) {
+      continue;
+    }
+    const latest = entries[entries.length - 1];
+    const value = Number(latest.value);
+    const pack = HAZARD_PACKS.find((item) => item.sensor === sensor);
+    const display = SENSOR_DISPLAY[sensor] || { label: sensor, type: sensor };
+
+    let status = "normal";
+    if (pack) {
+      if (triggered[pack.name] || value >= pack.threshold) {
+        status = "critical";
+      } else if (value >= pack.threshold * 0.75) {
+        status = "warning";
+      }
+    }
+
+    const history = entries.slice(-10).map((entry) => Number(entry.value));
+    const delta = history.length > 1 ? Number((history[history.length - 1] - history[0]).toFixed(2)) : 0;
+
+    rows.push({
+      id: `sensor-live-${identity.podId}-${sensor}`,
+      sensorId: `${identity.podId}:${sensor}`,
+      label: display.label,
+      type: display.type,
+      value,
+      unit: latest.unit || "",
+      delta,
+      deltaLabel: `${delta >= 0 ? "+" : ""}${delta}${latest.unit ? ` ${latest.unit}` : ""} recent trend`,
+      status,
+      risk: status === "critical" ? "high" : status === "warning" ? "medium" : "low",
+      zone: identity.region || "",
+      locationName: identity.podName,
+      podId: identity.podId,
+      hazard: pack?.name,
+      threshold: pack?.threshold,
+      source: latest.source || "pod-sensor",
+      lastReadingAt: latest.recordedAt,
+      history
+    });
+  }
+
+  return rows;
+}
+
 module.exports = {
   HAZARD_PACKS,
+  buildSensorTelemetry,
   getAlerts,
   getSensorReadings,
   getTriggeredPacks,

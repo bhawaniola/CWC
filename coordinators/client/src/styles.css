@@ -2551,3 +2551,125 @@ select {
 .ai-triage-line.upgraded b {
   color: #d0293f;
 }
+
+/* ---- Field sensors card (live Meraki telemetry for covered pods) ---- */
+
+.field-sensors-panel .sensor-empty-note {
+  margin: 4px 0 0;
+  color: #6b7a93;
+  font-size: 13px;
+}
+
+.sensor-stale-chip {
+  margin-left: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #f0d9b8;
+  background: #fdf6ea;
+  color: #9a6b1f;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.field-sensor-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.field-sensor-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #dde6f2;
+  background: #f8fbff;
+}
+
+.field-sensor-row svg {
+  flex-shrink: 0;
+  color: #4c6a96;
+}
+
+.field-sensor-row > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-sensor-row strong {
+  display: block;
+  font-size: 13px;
+  color: #22314a;
+}
+
+.field-sensor-row small {
+  color: #6b7a93;
+  font-size: 11.5px;
+}
+
+.field-sensor-row > b {
+  font-size: 15px;
+  color: #1d2c44;
+  white-space: nowrap;
+}
+
+.sensor-status-chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  border: 1px solid #cfe0d8;
+  background: #eefaf3;
+  color: #1f7a4d;
+}
+
+.field-sensor-row.warning {
+  border-color: #f0dcb4;
+  background: #fffaf0;
+}
+
+.sensor-status-chip.warning {
+  border-color: #f0d9a8;
+  background: #fdf3dd;
+  color: #9a6b1f;
+}
+
+.field-sensor-row.critical {
+  border-color: #f3c9cf;
+  background: #fff5f6;
+}
+
+.sensor-status-chip.critical {
+  border-color: #f3c4cc;
+  background: #fde9ec;
+  color: #c22740;
+}
+
+/* ---- Collapsed inbox cards + Details toggle ---- */
+
+.feed-item p.feed-message-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.feed-details-toggle {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #d7e0ec;
+  background: transparent;
+  color: #5b6b84;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.feed-details-toggle:hover {
+  background: rgba(100, 130, 180, 0.12);
+  color: #24344d;
+}

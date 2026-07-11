@@ -1242,6 +1242,10 @@ function syncOnce(trigger = "auto") {
   return activeSync;
 }
 
+// Last known sensor snapshot for the pods in this coordinator's coverage,
+// refreshed on every cloud pull (6s when connected, frozen when dark).
+let fieldSensors = { readings: [], fetchedAt: null, activePath: null };
+
 async function pullCloudMessages(trigger = "auto") {
   const route = await calculateMode();
   if (route.mode !== "cloud" || !route.activeLink?.url) {
@@ -1261,12 +1265,32 @@ async function pullCloudMessages(trigger = "auto") {
   let pulled = 0;
 
   try {
-    const [messagesResponse, requestsResponse] = await Promise.all([
+    const [messagesResponse, requestsResponse, sensorsResponse] = await Promise.all([
       axios.get(`${route.activeLink.url}/api/cloud/coordinator-messages?${query.toString()}`, {
         timeout: 2500
       }),
-      axios.get(`${route.activeLink.url}/api/cloud/requests`, { timeout: 2500 })
+      axios.get(`${route.activeLink.url}/api/cloud/requests`, { timeout: 2500 }),
+      axios
+        .get(`${route.activeLink.url}/api/cloud/sensors`, { timeout: 2500 })
+        .catch(() => null)
     ]);
+
+    // Field sensors for the pods this coordinator covers: kept as the last
+    // known snapshot, so when the uplink dies the dashboard shows honest
+    // stale data with its timestamp instead of going blank.
+    if (sensorsResponse?.data?.data) {
+      const covered = new Set(identity.coverageNodes);
+      const allReadings = Array.isArray(sensorsResponse.data.data.readings)
+        ? sensorsResponse.data.data.readings
+        : Array.isArray(sensorsResponse.data.data)
+          ? sensorsResponse.data.data
+          : [];
+      fieldSensors = {
+        readings: allReadings.filter((reading) => reading.podId && covered.has(reading.podId)),
+        fetchedAt: new Date().toISOString(),
+        activePath: route.activePath
+      };
+    }
 
     for (const message of messagesResponse.data?.data || []) {
       const result = storeIncoming(message, {
@@ -1356,8 +1380,17 @@ app.get("/api/coordinator/status", async (req, res) => {
       syncQueueCount: getSyncQueue().length,
       neighbors: identity.neighbors,
       coverageNodes: identity.coverageNodes,
-      connectedTowers: identity.connectedTowers
+      connectedTowers: identity.connectedTowers,
+      fieldSensors
     }
+  });
+});
+
+app.get("/api/coordinator/sensors", (req, res) => {
+  res.json({
+    success: true,
+    count: fieldSensors.readings.length,
+    data: fieldSensors
   });
 });
 

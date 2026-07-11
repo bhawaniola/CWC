@@ -7,6 +7,7 @@ const mongoose = require("mongoose");
 const { Server } = require("socket.io");
 const aiTriage = require("./services/aiTriage");
 const webex = require("./services/webexNotifier");
+const splunk = require("./services/splunkForwarder");
 
 const app = express();
 const server = http.createServer(app);
@@ -590,17 +591,16 @@ function sensorSummaryFrom(readings) {
   const sorted = [...readings].sort((left, right) => sensorTimeMs(right) - sensorTimeMs(left));
   const waterLevel = latestSensorOfType(sorted, "water-level");
   const rainfall = latestSensorOfType(sorted, "rainfall");
-  const soil = latestSensorOfType(sorted, "soil-moisture");
   const riskSignal = latestSensorOfType(sorted, "flood-risk");
-  const computedRisk = Math.min(
-    1,
-    Math.max(
-      0,
-      (Number(waterLevel?.value || 0) / 7.6) * 0.5 +
-        (Number(rainfall?.value || 0) / 80) * 0.3 +
-        (Number(soil?.value || 0) / 100) * 0.2
-    )
-  );
+  // Status-based risk: each pod computes its readings' status from the same
+  // hazard-pack thresholds that fire alerts, so the summary works no matter
+  // what units the sensors report (the old formula assumed the seeds' scales).
+  const statuses = readings.map((reading) => String(reading.status || reading.risk || "").toLowerCase());
+  const computedRisk = statuses.some((status) => ["critical", "danger", "high"].includes(status))
+    ? 0.85
+    : statuses.some((status) => ["warning", "medium", "elevated"].includes(status))
+      ? 0.55
+      : 0.2;
   const riskScore = Number(
     Number.isFinite(Number(riskSignal?.value)) ? Number(riskSignal.value).toFixed(2) : computedRisk.toFixed(2)
   );
@@ -660,6 +660,10 @@ function emitRealtime(type, payload) {
   };
   io.emit("cloud:update", event);
   io.emit(type, event);
+
+  // Every realtime event doubles as an enterprise log line: forwarded to
+  // Splunk over HEC when configured, a no-op otherwise (never blocking).
+  splunk.logEvent(type, payload);
 
   if (payload?.id) {
     console.log(`[cloud-api][socket][${payload.id}] emitted ${type} to command-center frontend`);
@@ -1572,6 +1576,17 @@ function coordinatorMessageMatchesQuery(message, query) {
 }
 
 async function storeRequest(body) {
+  // Pod sensor telemetry rides the same sync ladder as SOS traffic but it is
+  // not a request: feed the live sensor store (Sensors page, Splunk, sockets)
+  // and return without routing, triage, or a Requests-page entry.
+  if (body?.requestKind === "pod-sensor-update") {
+    await ingestPodSensorSnapshot(body);
+    return {
+      request: { ...body, id: body.id || `sensor-state-${body.podId || "unknown"}` },
+      duplicate: true
+    };
+  }
+
   const criticality = classifyCriticality(body || {});
   const request = {
     ...body,
@@ -1831,6 +1846,61 @@ async function seedDemoUserRequests() {
   }
 
   console.log(`[cloud-api][requests] seeded ${missing.length} demo user request(s) into MongoDB`);
+}
+
+// Latest telemetry timestamp per pod: mesh relays can deliver the same
+// stable-id snapshot twice or out of order, and an old copy must never
+// overwrite what the pod reported more recently.
+const podSensorReportedAt = new Map();
+let liveSensorDataSeen = false;
+
+async function ingestPodSensorSnapshot(event) {
+  const podId = event.podId;
+  const reportedAt = event.createdAt || nowIso();
+  if (!podId || !Array.isArray(event.readings) || event.readings.length === 0) {
+    return null;
+  }
+
+  const lastReported = podSensorReportedAt.get(podId);
+  if (lastReported && new Date(lastReported).getTime() > new Date(reportedAt).getTime()) {
+    return null;
+  }
+  podSensorReportedAt.set(podId, reportedAt);
+
+  // First real field telemetry retires the boot-time dummy seeds: the
+  // Sensors page shows live pod data or nothing, never a mix of both.
+  if (!liveSensorDataSeen) {
+    liveSensorDataSeen = true;
+    const seedCount = sensorReadings.filter((item) => String(item.source || "").includes("dummy-seed")).length;
+    if (seedCount > 0) {
+      for (let index = sensorReadings.length - 1; index >= 0; index -= 1) {
+        if (String(sensorReadings[index].source || "").includes("dummy-seed")) {
+          sensorReadings.splice(index, 1);
+        }
+      }
+      if (mongoConnected) {
+        await SensorReading.deleteMany({ source: { $regex: "dummy-seed" } }).catch(() => {});
+      }
+      console.log(`[cloud-api][sensors] live pod telemetry arrived; retired ${seedCount} dummy seed reading(s)`);
+    }
+  }
+
+  const stored = [];
+  for (const reading of event.readings) {
+    stored.push(
+      await upsertSensorReading(
+        {
+          ...reading,
+          podId,
+          podName: event.podName,
+          source: reading.source || "pod-sensor",
+          lastReadingAt: reading.lastReadingAt || reportedAt
+        },
+        true
+      )
+    );
+  }
+  return stored;
 }
 
 async function upsertSensorReading(body, emit = true) {

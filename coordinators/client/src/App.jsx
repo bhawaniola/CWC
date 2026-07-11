@@ -435,6 +435,69 @@ function NetworkCard({ data, onTogglePath, busyPath }) {
   );
 }
 
+function fieldSensorIcon(type) {
+  const kind = String(type || "").toLowerCase();
+  if (kind.includes("water")) return FiDroplet;
+  if (kind.includes("seismic")) return FiZap;
+  if (kind.includes("air")) return FiCloud;
+  return FiActivity;
+}
+
+function FieldSensorsCard({ fieldSensors }) {
+  const readings = fieldSensors?.readings || [];
+  const fetchedAt = fieldSensors?.fetchedAt;
+  const stale = fetchedAt ? Date.now() - new Date(fetchedAt).getTime() > 30000 : false;
+
+  return (
+    <section className="panel field-sensors-panel">
+      <div className="panel-heading">
+        <span className="section-icon" aria-hidden="true">
+          <FiActivity />
+        </span>
+        <div>
+          <p>Meraki field sensors in coverage</p>
+          <h2>
+            Live hazard telemetry
+            {stale ? <b className="sensor-stale-chip">stale — uplink down, last {formatTime(fetchedAt)}</b> : null}
+          </h2>
+        </div>
+      </div>
+
+      {readings.length === 0 ? (
+        <p className="sensor-empty-note">
+          {fetchedAt
+            ? "No pod in this coordinator's coverage is reporting sensors yet."
+            : "Waiting for the first sensor snapshot from the Command Center."}
+        </p>
+      ) : (
+        <div className="field-sensor-list">
+          {readings.map((reading) => {
+            const Icon = fieldSensorIcon(reading.type);
+            return (
+              <article className={classNames("field-sensor-row", reading.status)} key={reading.id}>
+                <Icon aria-hidden="true" />
+                <div>
+                  <strong>{reading.label}</strong>
+                  <small>
+                    {reading.locationName || reading.podId} · {formatTime(reading.lastReadingAt)}
+                  </small>
+                </div>
+                <b>
+                  {reading.value}
+                  {reading.unit ? ` ${reading.unit}` : ""}
+                </b>
+                <span className={classNames("sensor-status-chip", reading.status)}>
+                  {reading.status === "critical" ? "CRITICAL" : reading.status === "warning" ? "WATCH" : "NORMAL"}
+                </span>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FeedItem({ item, selected, busy, onSelect, onAction }) {
   // Another coordinator's claim, synced down from the Command Center. Shown
   // as advice, never a lock: with links dark the claim can't arrive, and a
@@ -445,6 +508,9 @@ function FeedItem({ item, selected, busy, onSelect, onAction }) {
     peerClaims.find((entry) => entry.status === "acknowledged") ||
     null;
   const peerName = peerClaim?.coordinatorName || peerClaim?.coordinatorId || "";
+  // Collapsed by default: who + what + severity + actions. Routing and
+  // transport detail lives behind the Details toggle.
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <article
@@ -471,15 +537,15 @@ function FeedItem({ item, selected, busy, onSelect, onAction }) {
           {peerClaim.at ? ` (${formatTime(peerClaim.at)})` : ""}
         </p>
       ) : null}
-      <p>{item.message}</p>
-      {item.aiTriage?.reason ? (
+      <p className={expanded ? "" : "feed-message-clamped"}>{item.message}</p>
+      {item.aiTriage?.reason && (expanded || item.aiTriage.upgraded) ? (
         <p className={classNames("ai-triage-line", item.aiTriage.upgraded && "upgraded")}>
           <FiZap aria-hidden="true" />
           <b>{item.aiTriage.upgraded ? "AI upgraded" : "AI"}</b>
           {item.aiTriage.reason}
         </p>
       ) : null}
-      {(item.targetCoordinatorName || item.routingSummary || item.matchedDepartments?.length) ? (
+      {expanded && (item.targetCoordinatorName || item.routingSummary || item.matchedDepartments?.length) ? (
         <div className="feed-route-meta">
           {item.targetCoordinatorName ? <span>Target: {item.targetCoordinatorName}</span> : null}
           {item.deliveryRoute?.transport ? (
@@ -492,14 +558,28 @@ function FeedItem({ item, selected, busy, onSelect, onAction }) {
         </div>
       ) : null}
       <footer>
-        <span>{item.location}</span>
-        <span>{item.source} via {item.transport}</span>
+        {expanded ? (
+          <>
+            <span>{item.location}</span>
+            <span>{item.source} via {item.transport}</span>
+          </>
+        ) : null}
         <span>
           received {formatTime(item.receivedAt)}
-          {item.originatedAt && formatTime(item.originatedAt) !== formatTime(item.receivedAt)
+          {expanded && item.originatedAt && formatTime(item.originatedAt) !== formatTime(item.receivedAt)
             ? ` (sent ${formatTime(item.originatedAt)})`
             : ""}
         </span>
+        <button
+          className="feed-details-toggle"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setExpanded((prev) => !prev);
+          }}
+        >
+          {expanded ? "Hide details" : "Details"}
+        </button>
       </footer>
       <div className="feed-actions">
         {item.workStatus === "acknowledged" ? (
@@ -1341,6 +1421,8 @@ export default function App() {
       {activeTab === "operations" ? (
         <>
           <DashboardSpecialist data={data} />
+
+          <FieldSensorsCard fieldSensors={data.fieldSensors} />
 
           <OperationsBoard
             ambulanceRoster={ambulances}
