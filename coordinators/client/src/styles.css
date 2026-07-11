@@ -2471,6 +2471,49 @@ select {
   font-weight: 800;
 }
 
+/* ---- peer-claim line on inbox cards (another team took this case) ---- */
+
+.peer-claim-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid #f5dcae;
+  background: #fff9ec;
+  color: #7a5b1f;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.peer-claim-line svg {
+  flex-shrink: 0;
+  color: #c98a12;
+}
+
+.peer-claim-line b {
+  flex-shrink: 0;
+  color: #a06a00;
+  font-weight: 800;
+}
+
+.peer-claim-line.resolved {
+  border-color: #bfe8d9;
+  background: #f0fbf6;
+  color: #2c6e54;
+}
+
+.peer-claim-line.resolved svg,
+.peer-claim-line.resolved b {
+  color: #0f9f88;
+}
+
+.feed-item.peer-claimed {
+  opacity: 0.82;
+}
+
 /* ---- AI triage line on inbox cards ---- */
 
 .ai-triage-line {

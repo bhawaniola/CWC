@@ -148,6 +148,14 @@ Key mechanics:
   actions sync back to the cloud as resolution events — the Command Center
   flips the delivery receipt, updates the request card, and archives it.
   Resolving works offline too; the receipt syncs when a link returns.
+- **Claim visibility (no double dispatch).** When Hospital 1 acknowledges a
+  request, every other coordinator holding the same request sees a banner on
+  its card within one pull cycle: *"Claimed by Hospital 1 Command — team
+  already responding; stand down unless contacted"* (green *"Handled by"*
+  once resolved). It is advice, never a lock: with every uplink dark the
+  claim physically cannot arrive, so a second team responding is always
+  allowed — the guarantee is that a claim is never lost and never lies, not
+  that it is instant. Worst case is two rescuers, never zero.
 - **Resource shortage loop.** A numeric resource at zero is `out-of-stock`
   (at <=10% of max: `low-stock`). The dashboard flags it, a shortage event
   syncs to the cloud, and the Command Center **routes new same-role requests
@@ -461,7 +469,15 @@ py -3 integrations/integration_test.py
     **Generate SITREP** on the dashboard for the AI's 30-second briefing.
     Kill the ollama container and repeat: everything still flows, cards
     read "rule-based triage" — AI is an enhancer, never a gatekeeper.
-15. **Phone in the pocket**: with the Webex app installed, submit an SOS
+15. **Claim race, honestly settled**: with beds stocked at both hospitals,
+    submit a medical SOS — both hospital inboxes get it. Click
+    **Acknowledge** on Hospital 1 and watch Hospital 2's copy of the card
+    grow a *"Claimed by Hospital 1 Command — stand down unless contacted"*
+    banner within ~6 seconds. Mark it handled on Hospital 1 and the banner
+    turns green (*"Handled by"*). Kill every uplink first and repeat to show
+    the honest failure mode: both teams may act until a link returns — two
+    rescuers, never zero.
+16. **Phone in the pocket**: with the Webex app installed, submit an SOS
     with critical words ("unconscious", "bleeding") — the SANJEEVNI Alerts
     space buzzes within seconds, naming the citizen, location, and routed
     coordinators. Then submit one with NO critical words ("speech is

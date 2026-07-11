@@ -1026,6 +1026,16 @@ function storeIncoming(payload, meta = {}) {
     // AI triage verdict rides down from the cloud with the delivery/pull; a
     // direct radio copy arrives without one and must not erase it on merge.
     aiTriage: payload.aiTriage?.status === "complete" ? payload.aiTriage : null,
+    // Claims by OTHER coordinators (acknowledged/resolved), stamped on the
+    // cloud copy of the request. Lets this dashboard show "already being
+    // handled by Hospital 1" so two teams don't dispatch for one case. Only
+    // the cloud path carries these — best-effort by design: with every
+    // uplink dark the claim can't arrive, and acting anyway is correct.
+    peerResolutions: Array.isArray(payload.resolutions)
+      ? payload.resolutions.filter(
+          (entry) => entry.coordinatorId && entry.coordinatorId !== identity.coordinatorId
+        )
+      : [],
     // When the request was created at the origin pod — can be much earlier
     // than receivedAt if it waited in an offline queue before syncing.
     originatedAt: payload.createdAt || payload.queuedAt || payload.receivedAt || "",
@@ -1058,6 +1068,11 @@ function storeIncoming(payload, meta = {}) {
         // that arrived over a path the verdict hasn't reached yet.
         severity: higherSeverity(existingItem.severity, item.severity),
         aiTriage: item.aiTriage || existingItem.aiTriage || null,
+        // A cloud copy carries the full current claim list (replace); a
+        // direct radio copy carries none and must not wipe what we know.
+        peerResolutions: item.peerResolutions.length
+          ? item.peerResolutions
+          : existingItem.peerResolutions || [],
         seenVia: Array.from(
           new Set([
             ...(Array.isArray(existingItem.seenVia) ? existingItem.seenVia : [existingItem.transport]),

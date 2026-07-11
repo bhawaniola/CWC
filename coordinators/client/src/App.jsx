@@ -436,13 +436,24 @@ function NetworkCard({ data, onTogglePath, busyPath }) {
 }
 
 function FeedItem({ item, selected, busy, onSelect, onAction }) {
+  // Another coordinator's claim, synced down from the Command Center. Shown
+  // as advice, never a lock: with links dark the claim can't arrive, and a
+  // second team responding is always allowed — better two than none.
+  const peerClaims = Array.isArray(item.peerResolutions) ? item.peerResolutions : [];
+  const peerClaim =
+    peerClaims.find((entry) => entry.status === "resolved") ||
+    peerClaims.find((entry) => entry.status === "acknowledged") ||
+    null;
+  const peerName = peerClaim?.coordinatorName || peerClaim?.coordinatorId || "";
+
   return (
     <article
       className={classNames(
         "feed-item",
         item.severity,
         selected && "selected",
-        item.workStatus === "acknowledged" && "acknowledged"
+        item.workStatus === "acknowledged" && "acknowledged",
+        peerClaim && "peer-claimed"
       )}
       onClick={() => onSelect(item)}
     >
@@ -450,6 +461,16 @@ function FeedItem({ item, selected, busy, onSelect, onAction }) {
         <strong>{item.title}</strong>
         <span>{item.severity}</span>
       </div>
+      {peerClaim ? (
+        <p className={classNames("peer-claim-line", peerClaim.status)}>
+          <FiUserCheck aria-hidden="true" />
+          <b>{peerClaim.status === "resolved" ? "Handled" : "Claimed"} by {peerName}</b>
+          {peerClaim.status === "resolved"
+            ? " — case closed by that team."
+            : " — team already responding; stand down unless contacted."}
+          {peerClaim.at ? ` (${formatTime(peerClaim.at)})` : ""}
+        </p>
+      ) : null}
       <p>{item.message}</p>
       {item.aiTriage?.reason ? (
         <p className={classNames("ai-triage-line", item.aiTriage.upgraded && "upgraded")}>
