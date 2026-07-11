@@ -2109,6 +2109,40 @@ button {
   text-align: right;
 }
 
+.stock-flag {
+  display: inline-block;
+  white-space: nowrap;
+  margin-left: 7px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
+.stock-flag.out-of-stock {
+  color: #be123c;
+  background: #fff1f4;
+  border: 1px solid #fecdd8;
+}
+
+.stock-flag.low-stock {
+  color: #c2570a;
+  background: #fff6ed;
+  border: 1px solid #fed7aa;
+}
+
+.resource-empty-note {
+  padding: 10px 0 2px;
+  color: #64748b;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
 .workforce-group-list {
   display: grid;
   gap: 12px;
@@ -2417,6 +2451,40 @@ button {
 
 .ai-triage-line.upgraded b {
   color: #d0293f;
+}
+
+.saturation-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #fecdd8;
+  background: #fff1f4;
+}
+
+.saturation-note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #be123c;
+}
+
+.saturation-note b,
+.saturation-note small {
+  display: block;
+}
+
+.saturation-note b {
+  color: #9f1239;
+  font-size: 13px;
+}
+
+.saturation-note small {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
 }
 
 .ai-verdict {

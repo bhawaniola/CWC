@@ -288,6 +288,11 @@ app.post("/api/coordinator-deliveries/retry", async (req, res) => {
   }
 });
 
+app.get("/api/coordinator-resources", async (req, res) => {
+  const payload = await getJson(`${CLOUD_URL}/api/coordinator-resources`);
+  res.json({ success: true, data: payload?.data || { generatedAt: "", coordinators: [] } });
+});
+
 app.get("/api/alerts", async (req, res) => {
   const payload = await getJson(`${CLOUD_URL}/api/alerts`);
   res.json({ success: true, data: payload?.data || [] });

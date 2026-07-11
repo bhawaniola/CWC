@@ -169,6 +169,21 @@ function earlyWarningMarkdown(request) {
   return lines.join("\n");
 }
 
+function saturationMarkdown(request, saturatedRoles) {
+  const roles = saturatedRoles.map((role) => role.toUpperCase()).join(", ");
+  const targets = (request.routing?.targets || []).map((target) => target.name).join(", ");
+  const lines = [`## 🆘 RESOURCE SATURATION — every ${roles} coordinator is OUT OF STOCK`];
+  if (request.message) {
+    lines.push(`> "${String(request.message).slice(0, 300)}"`);
+  }
+  lines.push(`- **What happened:** the network had no stocked ${roles} team left for this SOS`);
+  lines.push(`- **Fallback:** delivered to ${targets || "the out-of-stock team(s)"} anyway — a struggling responder beats silence`);
+  lines.push(`- **👉 Operator action needed:** restock, reassign, or activate an external facility`);
+  lines.push(`- **Where:** ${locationOf(request)} (${request.podId || "pod unknown"})`);
+  lines.push(`- **🕐 Time:** ${timestampLine()}`);
+  return lines.join("\n");
+}
+
 function queueRetry(key, markdown, attempts) {
   if (attempts >= MAX_RETRY_ATTEMPTS || retryQueue.length >= MAX_RETRY_QUEUE) {
     console.warn(`[cloud-api][webex] alert ${key} dropped after ${attempts} attempt(s)`);
@@ -231,6 +246,15 @@ function notifyEarlyWarning(request) {
   notify(`warning:${request.id}`, earlyWarningMarkdown(request)).catch(() => {});
 }
 
+// The routing layer had to deliver to out-of-stock coordinators because the
+// whole role tier is saturated — the one situation only a human can fix.
+function notifyResourceSaturation(request, saturatedRoles = []) {
+  if (!request?.id || !saturatedRoles.length || isDemoSeed(request) || tooOldToAlert(request)) {
+    return;
+  }
+  notify(`saturation:${request.id}`, saturationMarkdown(request, saturatedRoles)).catch(() => {});
+}
+
 async function sendTestAlert() {
   const markdown = [
     "## ✅ SANJEEVANI test alert",
@@ -273,6 +297,7 @@ module.exports = {
   WEBEX_ENABLED,
   notifyCriticalRequest,
   notifyEarlyWarning,
+  notifyResourceSaturation,
   sendTestAlert,
   webexHealth
 };

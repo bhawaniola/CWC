@@ -700,6 +700,14 @@ async function loadPersistedState() {
   alertsSent.splice(0, alertsSent.length, ...storedAlerts.map(toPlain));
   sensorReadings.splice(0, sensorReadings.length, ...storedSensors.map(toPlain));
   alertSeq = alertsSent.reduce((max, alert) => Math.max(max, Number(alert.seq) || 0), alertSeq);
+
+  // Rebuild the live resource map from persisted coordinator events so the
+  // Resources page survives a cloud restart without waiting for heartbeats.
+  for (const event of [...coordinatorEvents].reverse()) {
+    if (event.requestKind === "coordinator-field-update") {
+      recordCoordinatorResourceState(event);
+    }
+  }
 }
 
 async function persistDocument(Model, filter, document) {
@@ -1018,6 +1026,54 @@ function recordCoordinatorShortage(coordinatorId, fieldId, level) {
   coordinatorShortageLevels.set(coordinatorId, fields);
 }
 
+// Latest full resource snapshot per coordinator (coordinator-field-update
+// events carry the coordinator's complete field state). Powers the Command
+// Center's Resources page with real stock instead of placeholders.
+const coordinatorResourceStates = new Map(); // coordinatorId -> snapshot entry
+
+function recordCoordinatorResourceState(event) {
+  const coordinatorId = event.coordinatorId || event.podId;
+  if (!coordinatorId || !Array.isArray(event.state?.fields) || !event.state.fields.length) {
+    return null;
+  }
+
+  const reportedAt = event.createdAt || event.cloudReceivedAt || nowIso();
+  const existing = coordinatorResourceStates.get(coordinatorId);
+  // An offline sync queue can deliver an old snapshot after a newer one —
+  // stale stock must never bury what the coordinator reported more recently.
+  if (existing && new Date(existing.reportedAt).getTime() > new Date(reportedAt).getTime()) {
+    return existing;
+  }
+
+  const entry = {
+    coordinatorId,
+    coordinatorName: event.coordinatorName || event.podName || coordinatorId,
+    role: String(event.coordinatorRole || "").toLowerCase(),
+    roleLabel: event.coordinatorRoleLabel || event.category || "",
+    location: event.location || "",
+    coverageNodes: Array.isArray(event.coverageNodes) ? event.coverageNodes : [],
+    network: event.network || {},
+    // shortageLevel is taken as declared by the coordinator's own server —
+    // the EOC never invents a flag the field team's screen doesn't show.
+    fields: event.state.fields.map((field) => ({
+      ...field,
+      shortageLevel: field.shortageLevel || null
+    })),
+    reportedAt,
+    receivedAt: nowIso()
+  };
+  coordinatorResourceStates.set(coordinatorId, entry);
+
+  // The snapshot is also the routing map's recovery path: a restarted cloud
+  // forgets in-memory shortage levels, and the next heartbeat re-teaches it
+  // (and clears any level the coordinator no longer declares).
+  for (const field of entry.fields) {
+    recordCoordinatorShortage(coordinatorId, field.id, field.shortageLevel || null);
+  }
+
+  return entry;
+}
+
 function coordinatorIsOutOfStock(coordinatorId) {
   const fields = coordinatorShortageLevels.get(coordinatorId);
   if (!fields) {
@@ -1028,6 +1084,7 @@ function coordinatorIsOutOfStock(coordinatorId) {
 
 function targetsWithStock(targets, roles) {
   const finalTargets = [];
+  const saturatedRoles = [];
 
   for (const role of roles) {
     const roleTargets = targets.filter((target) => target.role === role);
@@ -1042,11 +1099,19 @@ function targetsWithStock(targets, roles) {
     }
 
     // If every coordinator of this role is out of stock, deliver anyway —
-    // a struggling responder is still better than silence.
+    // a struggling responder is still better than silence — but record the
+    // saturation so the request card, the log, and Webex can escalate it to
+    // the operator: this is the one situation only a human can fix.
+    if (roleTargets.length > 0 && stocked.length === 0) {
+      saturatedRoles.push(role);
+      console.warn(
+        `[cloud-api][routing] ROLE SATURATED: every ${role} coordinator is out of stock — delivering as last resort`
+      );
+    }
     finalTargets.push(...(stocked.length ? stocked : roleTargets));
   }
 
-  return finalTargets;
+  return { targets: finalTargets, saturatedRoles };
 }
 
 async function routeRequestToCoordinators(request, duplicate = false) {
@@ -1097,7 +1162,7 @@ async function routeRequestToCoordinators(request, duplicate = false) {
     ];
     classification.summary = classification.departments.map((item) => item.label).join(", ");
   }
-  const targets = targetsWithStock(
+  const { targets, saturatedRoles } = targetsWithStock(
     coordinatorTargetsForClassification(classification),
     classification.roles
   );
@@ -1115,9 +1180,14 @@ async function routeRequestToCoordinators(request, duplicate = false) {
       classification,
       targets: targetSummary,
       targetCount: targetSummary.length,
+      saturatedRoles,
       plannedAt: nowIso()
     }
   };
+
+  if (saturatedRoles.length > 0 && !duplicate) {
+    webex.notifyResourceSaturation(routedRequest, saturatedRoles);
+  }
 
   const requestIndex = requests.findIndex((item) => item.id === request.id);
   if (requestIndex >= 0) {
@@ -1643,6 +1713,15 @@ async function storeRequest(body) {
       );
     }
 
+    // A field-update event carries the coordinator's full resource state —
+    // keep the latest snapshot so the Resources page shows real live stock.
+    if (request.requestKind === "coordinator-field-update") {
+      const resourceEntry = recordCoordinatorResourceState(request);
+      if (resourceEntry) {
+        emitRealtime("coordinator-resources:updated", resourceEntry);
+      }
+    }
+
     if (request.requestKind === "coordinator-resource-shortage") {
       const shortageCoordinatorId = request.coordinatorId || request.podId;
       if (shortageCoordinatorId && request.field?.id) {
@@ -2034,6 +2113,40 @@ app.get("/api/coordinator-events", (req, res) => {
     success: true,
     count: filtered.length,
     data: filtered
+  });
+});
+
+// Live resource stock per coordinator, as reported by the coordinators
+// themselves over their own sync ladder. Registry entries that have not
+// reported yet are included with reported:false so the UI can say so honestly.
+app.get("/api/coordinator-resources", (req, res) => {
+  const remaining = new Map(coordinatorResourceStates);
+  const data = COORDINATORS.map((coordinator) => {
+    const entry = remaining.get(coordinator.id);
+    remaining.delete(coordinator.id);
+    if (entry) {
+      return { ...entry, reported: true };
+    }
+    return {
+      coordinatorId: coordinator.id,
+      coordinatorName: coordinator.name,
+      role: coordinator.role,
+      roleLabel: "",
+      fields: [],
+      reported: false,
+      reportedAt: null
+    };
+  });
+  for (const entry of remaining.values()) {
+    data.push({ ...entry, reported: true });
+  }
+
+  res.json({
+    success: true,
+    data: {
+      generatedAt: nowIso(),
+      coordinators: data
+    }
   });
 });
 

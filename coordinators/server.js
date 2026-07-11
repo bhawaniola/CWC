@@ -46,7 +46,7 @@ const ROLE_TEMPLATES = {
       numberField("oxygenCylinders", "Oxygen cylinders", 42, "cyl", 0, 400),
       numberField("emergencyDoctors", "Emergency doctors", 8, "staff", 0, 80),
       numberField("ambulancesReady", "Ambulances ready", 3, "units", 0, 30),
-      numberField("criticalPatients", "Critical patients", 7, "cases", 0, 120),
+      gaugeField("criticalPatients", "Critical patients", 7, "cases", 0, 120),
       numberField("medicineKits", "Medicine kits", 64, "kits", 0, 800)
     ],
     tasks: [
@@ -79,10 +79,10 @@ const ROLE_TEMPLATES = {
     fields: [
       numberField("waterStockLitres", "Water stock", 4200, "litres", 0, 20000),
       numberField("foodPackets", "Food packets", 860, "packs", 0, 10000),
-      numberField("occupancy", "People registered", 276, "people", 0, 5000),
+      gaugeField("occupancy", "People registered", 276, "people", 0, 5000),
       numberField("blankets", "Blankets available", 310, "items", 0, 8000),
       numberField("sanitationKits", "Sanitation kits", 138, "kits", 0, 5000),
-      numberField("resourceShortageAlerts", "Shortage alerts", 2, "alerts", 0, 100)
+      gaugeField("resourceShortageAlerts", "Shortage alerts", 2, "alerts", 0, 100)
     ],
     tasks: [
       task("Dry ration delivery", "Confirm food packet dispatch for nearby pods", "active"),
@@ -112,10 +112,10 @@ const ROLE_TEMPLATES = {
       "worker"
     ],
     fields: [
-      numberField("volunteersOnDuty", "Volunteers on duty", 34, "people", 0, 500),
+      gaugeField("volunteersOnDuty", "Volunteers on duty", 34, "people", 0, 500),
       numberField("volunteersAvailable", "Volunteers available", 19, "people", 0, 500),
-      numberField("pendingAssignments", "Pending assignments", 11, "jobs", 0, 250),
-      numberField("shiftCoverage", "Shift coverage", 82, "%", 0, 100),
+      gaugeField("pendingAssignments", "Pending assignments", 11, "jobs", 0, 250),
+      gaugeField("shiftCoverage", "Shift coverage", 82, "%", 0, 100),
       numberField("skilledMedics", "Skilled medics", 6, "people", 0, 100),
       numberField("transportCrews", "Transport crews", 5, "crews", 0, 80)
     ],
@@ -146,10 +146,10 @@ const ROLE_TEMPLATES = {
       "wildfire"
     ],
     fields: [
-      numberField("activeRescueAlerts", "Active fire/flood rescue alerts", 5, "alerts", 0, 100),
-      numberField("blockedRoutes", "Blocked routes", 3, "routes", 0, 60),
+      gaugeField("activeRescueAlerts", "Active fire/flood rescue alerts", 5, "alerts", 0, 100),
+      gaugeField("blockedRoutes", "Blocked routes", 3, "routes", 0, 60),
       numberField("pumpsReady", "Rescue equipment ready", 14, "sets", 0, 100),
-      numberField("criticalEvacuations", "Critical evacuations", 4, "zones", 0, 80),
+      gaugeField("criticalEvacuations", "Critical evacuations", 4, "zones", 0, 80),
       numberField("breathingKits", "Breathing kits", 22, "kits", 0, 200),
       numberField("waterTenderLevel", "Water tender level", 76, "%", 0, 100)
     ],
@@ -182,10 +182,10 @@ const ROLE_TEMPLATES = {
       "waterlogged"
     ],
     fields: [
-      numberField("trappedPeopleCases", "Trapped people cases", 9, "cases", 0, 200),
+      gaugeField("trappedPeopleCases", "Trapped people cases", 9, "cases", 0, 200),
       numberField("boatsAvailable", "Boats available", 6, "boats", 0, 80),
-      numberField("rescueTeamsActive", "Rescue teams active", 5, "teams", 0, 100),
-      numberField("completedRescues", "Completed rescues", 28, "people", 0, 1000),
+      gaugeField("rescueTeamsActive", "Rescue teams active", 5, "teams", 0, 100),
+      gaugeField("completedRescues", "Completed rescues", 28, "people", 0, 1000),
       numberField("lifeJackets", "Life jackets", 74, "items", 0, 500),
       numberField("ropeKits", "Rope kits", 18, "kits", 0, 150)
     ],
@@ -201,7 +201,11 @@ const ROLE_TEMPLATES = {
   }
 };
 
-function numberField(id, label, value, unit, min, max) {
+// kind: "stock" fields are supplies — hitting zero means this team cannot
+// serve and the Command Center should reroute. "gauge" fields are workload
+// counters (patients, occupancy, pending jobs): zero is a GOOD number there
+// and must never be read as a shortage.
+function numberField(id, label, value, unit, min, max, kind = "stock") {
   return {
     id,
     label,
@@ -210,8 +214,13 @@ function numberField(id, label, value, unit, min, max) {
     inputType: "number",
     min,
     max,
+    kind,
     updatedAt: new Date().toISOString()
   };
+}
+
+function gaugeField(id, label, value, unit, min, max) {
+  return numberField(id, label, value, unit, min, max, "gauge");
 }
 
 function task(title, detail, status) {
@@ -395,10 +404,19 @@ function mergeState(saved) {
     ...base,
     ...saved,
     identity,
-    fields: base.fields.map((field) => ({
-      ...field,
-      ...(savedFieldById.get(field.id) || {})
-    })),
+    fields: base.fields.map((field) => {
+      const merged = {
+        ...field,
+        ...(savedFieldById.get(field.id) || {}),
+        // The template is the source of truth for a field's kind, and a
+        // gauge must never keep a shortage flag written by an older build.
+        kind: field.kind
+      };
+      if (field.kind === "gauge") {
+        merged.shortageLevel = null;
+      }
+      return merged;
+    }),
     tasks: Array.isArray(saved.tasks) && saved.tasks.length ? saved.tasks : base.tasks,
     incidents: Array.isArray(saved.incidents) && saved.incidents.length ? saved.incidents : base.incidents,
     // Anything already in history must not also sit in the inbox — repairs
@@ -651,6 +669,52 @@ function fieldValueForDisplay(field) {
   return `${field.value}${unit}`;
 }
 
+function fieldSnapshot(field) {
+  return {
+    id: field.id,
+    label: field.label,
+    value: field.value,
+    unit: field.unit,
+    max: field.max,
+    inputType: field.inputType,
+    kind: fieldKind(field),
+    shortageLevel: field.shortageLevel || null,
+    updatedAt: field.updatedAt
+  };
+}
+
+// Full resource snapshot sent at boot and as a slow heartbeat so the Command
+// Center's Resources page always has this coordinator's real stock levels —
+// even after a cloud restart. The id is stable per coordinator, so an offline
+// sync queue holds at most one pending snapshot (enqueueSyncEvent replaces by
+// id) and the cloud keeps one document per coordinator instead of a trail.
+function buildResourceSnapshotEvent(state, route) {
+  return {
+    id: `coord-state-${identity.coordinatorId}`,
+    requestKind: "coordinator-field-update",
+    podId: identity.coordinatorId,
+    podName: identity.coordinatorName,
+    coordinatorId: identity.coordinatorId,
+    coordinatorName: identity.coordinatorName,
+    coordinatorRole: identity.role,
+    coordinatorRoleLabel: roleTemplate.roleLabel,
+    category: roleTemplate.roleLabel,
+    location: `${identity.region} | ${identity.coverageNodes.join(", ")}`,
+    message: `${identity.coordinatorName} reported current resource stock (${state.fields.length} fields).`,
+    state: {
+      fields: state.fields.map(fieldSnapshot),
+      tasks: state.tasks,
+      incidents: state.incidents
+    },
+    coverageNodes: identity.coverageNodes,
+    network: {
+      activePath: route?.activePath || "queued",
+      mode: route?.mode || "queued"
+    },
+    createdAt: new Date().toISOString()
+  };
+}
+
 function buildFieldUpdateEvent(field, state, route) {
   return {
     id: `coord-sync-${identity.coordinatorId}-${field.id}-${Date.now()}`,
@@ -669,16 +733,13 @@ function buildFieldUpdateEvent(field, state, route) {
       label: field.label,
       value: field.value,
       unit: field.unit,
+      max: field.max,
+      inputType: field.inputType,
+      shortageLevel: field.shortageLevel || null,
       updatedAt: field.updatedAt
     },
     state: {
-      fields: state.fields.map((item) => ({
-        id: item.id,
-        label: item.label,
-        value: item.value,
-        unit: item.unit,
-        updatedAt: item.updatedAt
-      })),
+      fields: state.fields.map(fieldSnapshot),
       tasks: state.tasks,
       incidents: state.incidents
     },
@@ -696,8 +757,23 @@ function buildFieldUpdateEvent(field, state, route) {
 // requests toward a coordinator that still has capacity.
 const LOW_STOCK_RATIO = 0.1;
 
+// State files written before fields carried a kind fall back to the template.
+function fieldKind(field) {
+  if (field.kind) {
+    return field.kind;
+  }
+  const templateField = roleTemplate.fields.find((item) => item.id === field.id);
+  return templateField?.kind || "stock";
+}
+
 function shortageLevelFor(field) {
   if (field.inputType !== "number" || !Number.isFinite(field.value)) {
+    return null;
+  }
+
+  // Workload gauges (patients, occupancy, pending jobs) at zero are good
+  // news, not a shortage — an empty shelter must never be routed around.
+  if (fieldKind(field) === "gauge") {
     return null;
   }
 
@@ -1621,6 +1697,24 @@ setInterval(() => {
     console.warn(`[coordinator] cloud pull failed: ${error.message}`);
   });
 }, CLOUD_PULL_INTERVAL_MS);
+
+// Boot snapshot + slow heartbeat keep the Command Center's Resources page
+// populated with real stock even across cloud restarts. Stable event id per
+// coordinator means the sync queue and the cloud each hold one copy.
+const RESOURCE_SNAPSHOT_INTERVAL_MS = Number(process.env.RESOURCE_SNAPSHOT_INTERVAL_MS || 120000);
+
+async function queueResourceSnapshot(trigger) {
+  try {
+    const route = await calculateMode();
+    enqueueSyncEvent(buildResourceSnapshotEvent(getState(), route));
+    triggerSync(trigger);
+  } catch (error) {
+    console.warn(`[coordinator] resource snapshot failed: ${error.message}`);
+  }
+}
+
+setTimeout(() => queueResourceSnapshot("boot-snapshot"), 10000);
+setInterval(() => queueResourceSnapshot("resource-heartbeat"), RESOURCE_SNAPSHOT_INTERVAL_MS);
 
 app.listen(PORT, () => {
   getState();

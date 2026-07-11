@@ -108,7 +108,14 @@ realtime socket events to the browser (with a polling fallback). Pages:
 - **Network** — live topology, QoS table, pod-route table, and **simulation
   controls that really fail/restore the satellite and cell tower containers**.
   Fail a link and watch the pod table reroute.
-- **Resources / Volunteers** — relief-operations view (representative data).
+- **Resources / Volunteers** — live stock per coordinator, reported by the
+  coordinators themselves. Every coordinator syncs its full resource state
+  (a snapshot at boot, a slow heartbeat, and on every field edit) up its own
+  satellite -> cellular -> mesh ladder; the page shows real values, capacity
+  bars, declared `LOW STOCK` / `OUT OF STOCK` flags, and when each team last
+  reported. Set Hospital 1's beds to 0 on its dashboard and watch this page
+  flag it seconds later — the same signal the router uses to send new medical
+  requests to Hospital 2 (scenario 13).
 - **Alerts** — a real notification center: the bell badge counts only what
   arrived since the operator last opened this page (persisted per browser),
   plus the signed-alert broadcast box (Ed25519) and the Shield security log.
@@ -439,7 +446,13 @@ py -3 integrations/integration_test.py
 13. **Out-of-stock rerouting**: set Hospital 1's beds to 0, submit a medical
     SOS from POD-02 — the cloud logs `skipping Hospital1: reported
     out-of-stock` and delivers to Hospital 2 instead. Restock and routing
-    returns to normal.
+    returns to normal. Two design rules underneath: only **stock** fields
+    (beds, kits, boats) can flag a shortage — workload gauges (critical
+    patients, camp occupancy) at zero are good news and never reroute — and
+    if **every** coordinator of a role is out of stock, the cloud still
+    delivers (never silence), but marks the request `last-resort`, shows a
+    red escalation note on the EOC card, and buzzes Webex so a human
+    restocks a team or activates an external facility.
 14. **AI catches what keywords miss**: submit "my chest feels heavy and I'm
     dizzy" at any pod — no critical keyword matches, so the card starts LOW.
     Seconds later the AI upgrades it to CRITICAL severity 9 with the reason

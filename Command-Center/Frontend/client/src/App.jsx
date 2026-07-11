@@ -1422,6 +1422,23 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
                   </div>
                 </div>
 
+                {request.routing?.saturatedRoles?.length ? (
+                  <div className="saturation-note">
+                    <AlertTriangle size={16} />
+                    <div>
+                      <b>
+                        Last-resort delivery — every{" "}
+                        {request.routing.saturatedRoles.join(" and ")} coordinator reported out of
+                        stock
+                      </b>
+                      <small>
+                        Delivered anyway so the case is never silent. Operator action needed:
+                        restock a team or activate an external facility.
+                      </small>
+                    </div>
+                  </div>
+                ) : null}
+
                 {request.aiTriage ? (
                   <div
                     className={`ai-verdict ${
@@ -1785,110 +1802,196 @@ function NetworkPage({ overview, infraAction, restoreAll }) {
   );
 }
 
+const RESOURCE_ROLE_PRESENTATION = {
+  hospital: { Icon: HeartPulse, tone: "red" },
+  shelter: { Icon: Home, tone: "teal" },
+  workforce: { Icon: Users, tone: "violet" },
+  fire: { Icon: Siren, tone: "orange" },
+  flood: { Icon: LifeBuoy, tone: "blue" }
+};
+
+function resourceRolePresentation(role) {
+  return RESOURCE_ROLE_PRESENTATION[String(role || "").toLowerCase()] || { Icon: Boxes, tone: "blue" };
+}
+
+function numericResourceFields(entry) {
+  return (entry.fields || []).filter((field) => Number.isFinite(Number(field.value)));
+}
+
+function latestFieldUpdateAt(entry) {
+  const times = (entry.fields || [])
+    .map((field) => new Date(field.updatedAt || 0).getTime())
+    .filter((ms) => ms > 0);
+  const reported = new Date(entry.reportedAt || 0).getTime();
+  const latest = Math.max(reported, ...(times.length ? times : [0]));
+  return latest > 0 ? new Date(latest).toISOString() : null;
+}
+
 function ResourcesPage() {
-  const coordinatorResources = [
-    {
-      name: "Hospital1",
-      role: "Medical",
-      zone: "Celltower 1",
-      Icon: HeartPulse,
-      tone: "red",
-      resources: [
-        ["Ambulances", 5, 8],
-        ["Medical Kits", 184, 250],
-        ["Oxygen Cylinders", 42, 60],
-        ["Beds Ready", 31, 45]
-      ]
-    },
-    {
-      name: "FloodRescueDept",
-      role: "Rescue",
-      zone: "Satellite",
-      Icon: LifeBuoy,
-      tone: "blue",
-      resources: [
-        ["Rescue Boats", 7, 10],
-        ["Life Jackets", 116, 160],
-        ["Rope Kits", 28, 40],
-        ["Portable Radios", 19, 25]
-      ]
-    },
-    {
-      name: "ShelterCampB",
-      role: "Shelter",
-      zone: "Celltower 1",
-      Icon: Home,
-      tone: "teal",
-      resources: [
-        ["Open Beds", 240, 420],
-        ["Food Packets", 2680, 4000],
-        ["Blankets", 740, 1200],
-        ["Water Cans", 860, 1400]
-      ]
-    },
-    {
-      name: "WorkForceCamp1",
-      role: "Workforce",
-      zone: "Celltower 2",
-      Icon: Users,
-      tone: "violet",
-      resources: [
-        ["Field Workers", 38, 52],
-        ["Drivers", 9, 14],
-        ["Utility Trucks", 6, 9],
-        ["Power Banks", 320, 800]
-      ]
-    }
-  ];
+  const [snapshot, setSnapshot] = useState(null);
 
-  const workforceGroups = [
-    {
-      coordinator: "WorkForceCamp1",
-      coverage: "Zone 1, Zone 2",
-      active: 38,
-      volunteers: [
-        ["Rohit Sharma", "Evacuation", "Shelter transfer - Zone 1", "On Duty"],
-        ["Neha Verma", "Logistics", "Food packet delivery", "On Duty"],
-        ["Arjun Nair", "Search & Rescue", "Boat loading support", "Available"],
-        ["Karan Patel", "Communications", "Tower relay support", "On Duty"]
-      ]
-    },
-    {
-      coordinator: "WorkForceCamp2",
-      coverage: "Zone 2, Zone 3",
-      active: 31,
-      volunteers: [
-        ["Priya Iyer", "First Aid", "Shelter Camp B", "On Break"],
-        ["Meera Joshi", "Logistics", "Blanket dispatch", "Available"],
-        ["Dev Kumar", "Driver", "Ambulance support route", "On Duty"],
-        ["Sameer Khan", "Field Support", "Flood rescue staging", "Available"]
-      ]
-    }
-  ];
+  useEffect(() => {
+    let mounted = true;
+    const load = () =>
+      api("/api/coordinator-resources")
+        .then((result) => {
+          if (mounted && result.success) setSnapshot(result.data);
+        })
+        .catch(() => {});
+    load();
+    const timer = setInterval(load, 8000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, []);
 
-  const totals = coordinatorResources.flatMap((group) => group.resources);
-  const totalStock = totals.reduce((sum, [, current]) => sum + current, 0);
-  const totalCapacity = totals.reduce((sum, [, , capacity]) => sum + capacity, 0);
-  const totalVolunteers = workforceGroups.reduce((sum, group) => sum + group.active, 0);
-  const avgStock = Math.round((totalStock / totalCapacity) * 100);
+  const coordinators = snapshot?.coordinators || [];
+  const reporting = coordinators.filter((entry) => entry.reported && (entry.fields || []).length);
+  const workforceEntries = coordinators.filter(
+    (entry) => String(entry.role || "").toLowerCase() === "workforce"
+  );
+  const resourceEntries = coordinators.filter(
+    (entry) => String(entry.role || "").toLowerCase() !== "workforce"
+  );
+
+  const stockFields = reporting.flatMap((entry) =>
+    numericResourceFields(entry).filter(
+      (field) => Number.isFinite(Number(field.max)) && Number(field.max) > 0
+    )
+  );
+  const avgStock = stockFields.length
+    ? Math.round(
+        (stockFields.reduce(
+          (sum, field) => sum + Math.min(1, Number(field.value) / Number(field.max)),
+          0
+        ) /
+          stockFields.length) *
+          100
+      )
+    : 0;
+  const shortageFields = reporting.flatMap((entry) =>
+    (entry.fields || []).filter((field) => field.shortageLevel)
+  );
+  const outOfStockCount = shortageFields.filter(
+    (field) => field.shortageLevel === "out-of-stock"
+  ).length;
+
+  const workforceFieldTotal = (fieldId) =>
+    workforceEntries.reduce(
+      (sum, entry) =>
+        sum + (Number((entry.fields || []).find((field) => field.id === fieldId)?.value) || 0),
+      0
+    );
+  const volunteersOnDuty = workforceFieldTotal("volunteersOnDuty");
+  const volunteersAvailable = workforceFieldTotal("volunteersAvailable");
+
+  const lastReportAt = reporting
+    .map((entry) => latestFieldUpdateAt(entry))
+    .filter(Boolean)
+    .sort()
+    .pop();
 
   return (
     <div className="page">
-      <div className="page-head"><div><h2>Resources & Volunteers</h2><p>Coordinator-wise resource stock and workforce availability.</p></div><span className="live-dot">Live</span></div>
-      <div className="resource-layout">
-        <main>
-          <div className="metric-grid compact">
-            <MetricCard Icon={Boxes} tone="blue" label="Resource Groups" value={coordinatorResources.length} sub={`${avgStock}% average stock`} />
-            <MetricCard Icon={HeartPulse} tone="red" label="Medical Units" value="262" sub="kits, beds, oxygen" />
-            <MetricCard Icon={Home} tone="teal" label="Shelter Supplies" value="4,520" sub="beds, food, blankets" />
-            <MetricCard Icon={Users} tone="violet" label="Active Workforce" value={totalVolunteers} sub="mapped to camps" />
-          </div>
-          <ResourceCoordinatorGrid groups={coordinatorResources} />
-        </main>
-        <aside>
-          <WorkforceCoordinatorPanel groups={workforceGroups} />
-        </aside>
+      <div className="page-head">
+        <div>
+          <h2>Resources & Volunteers</h2>
+          <p>Live stock reported by each coordinator over its own uplink ladder.</p>
+        </div>
+        <span className="live-dot">Live</span>
       </div>
+      {!snapshot ? (
+        <section className="panel">
+          <div className="panel-head"><h3>Loading coordinator reports…</h3></div>
+        </section>
+      ) : reporting.length === 0 ? (
+        <section className="panel">
+          <div className="panel-head"><h3>Waiting for coordinator reports</h3></div>
+          <p className="resource-empty-note">
+            No coordinator has synced its resource state yet. Snapshots arrive automatically a
+            few seconds after each coordinator boots, and again whenever a field team edits its
+            stock — if a coordinator&apos;s uplink is down, its report lands when a link returns.
+          </p>
+        </section>
+      ) : (
+        <div className="resource-layout">
+          <main>
+            <div className="metric-grid compact">
+              <MetricCard
+                Icon={Boxes}
+                tone="blue"
+                label="Reporting Coordinators"
+                value={`${reporting.length}/${coordinators.length}`}
+                sub={`${avgStock}% average stock`}
+              />
+              <MetricCard
+                Icon={AlertTriangle}
+                tone="red"
+                label="Shortage Flags"
+                value={shortageFields.length}
+                sub={`${outOfStockCount} out of stock`}
+              />
+              <MetricCard
+                Icon={Users}
+                tone="violet"
+                label="Volunteers On Duty"
+                value={volunteersOnDuty}
+                sub={`${volunteersAvailable} more available`}
+              />
+              <MetricCard
+                Icon={Activity}
+                tone="teal"
+                label="Last Report"
+                value={lastReportAt ? ago(lastReportAt) : "—"}
+                sub="synced from the field"
+              />
+            </div>
+            <ResourceCoordinatorGrid groups={resourceEntries} />
+          </main>
+          <aside>
+            <WorkforceCoordinatorPanel groups={workforceEntries} />
+          </aside>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const SHORTAGE_BAR_COLORS = {
+  "out-of-stock": "#e11d48",
+  "low-stock": "#f97316"
+};
+
+function ResourceStockRow({ field }) {
+  const value = Number(field.value);
+  const max = Number(field.max);
+  const hasCapacity = Number.isFinite(max) && max > 0;
+  const percent = hasCapacity ? Math.max(0, Math.min(100, Math.round((value / max) * 100))) : null;
+  const barColor = SHORTAGE_BAR_COLORS[field.shortageLevel];
+  return (
+    <div className="resource-stock-row">
+      <span>
+        {field.label}
+        {field.shortageLevel ? (
+          <em className={`stock-flag ${field.shortageLevel}`}>
+            {field.shortageLevel === "out-of-stock" ? "out of stock" : "low"}
+          </em>
+        ) : null}
+      </span>
+      <b>
+        {Number.isFinite(value) ? value : "—"}
+        {hasCapacity ? ` / ${max}` : ""} {field.unit || ""}
+      </b>
+      <div className="bar">
+        <span
+          style={{
+            width: `${percent === null ? 0 : percent}%`,
+            ...(barColor ? { background: barColor } : {})
+          }}
+        />
+      </div>
+      <small>{percent === null ? "—" : `${percent}%`}</small>
     </div>
   );
 }
@@ -1898,51 +2001,71 @@ function ResourceCoordinatorGrid({ groups }) {
     <section className="panel resource-coordinator-panel">
       <div className="panel-head"><h3>Coordinator Resource Map</h3><span>{groups.length} coordinators</span></div>
       <div className="resource-coordinator-grid">
-        {groups.map(({ name, role, zone, Icon, tone, resources }) => (
-          <article className="resource-coordinator-card" key={name}>
-            <header>
-              <IconTile Icon={Icon} tone={tone} />
-              <div><b>{name}</b><span>{role} · {zone}</span></div>
-            </header>
-            {resources.map(([label, current, capacity]) => {
-              const percent = Math.round((current / capacity) * 100);
-              return (
-                <div className="resource-stock-row" key={label}>
-                  <span>{label}</span>
-                  <b>{current} / {capacity}</b>
-                  <div className="bar"><span style={{ width: `${percent}%` }} /></div>
-                  <small>{percent}%</small>
+        {groups.map((entry) => {
+          const { Icon, tone } = resourceRolePresentation(entry.role);
+          const updatedAt = latestFieldUpdateAt(entry);
+          return (
+            <article className="resource-coordinator-card" key={entry.coordinatorId}>
+              <header>
+                <IconTile Icon={Icon} tone={tone} />
+                <div>
+                  <b>{entry.coordinatorName}</b>
+                  <span>
+                    {entry.roleLabel || cap(entry.role || "coordinator")}
+                    {updatedAt ? ` · updated ${ago(updatedAt)}` : ""}
+                  </span>
                 </div>
-              );
-            })}
-          </article>
-        ))}
+              </header>
+              {entry.reported && (entry.fields || []).length ? (
+                entry.fields.map((field) => <ResourceStockRow field={field} key={field.id} />)
+              ) : (
+                <p className="resource-empty-note">Awaiting first stock report from this coordinator.</p>
+              )}
+            </article>
+          );
+        })}
       </div>
     </section>
   );
 }
 
 function WorkforceCoordinatorPanel({ groups }) {
+  const totalActive = groups.reduce(
+    (sum, entry) =>
+      sum + (Number((entry.fields || []).find((field) => field.id === "volunteersOnDuty")?.value) || 0),
+    0
+  );
   return (
     <section className="panel workforce-panel">
-      <div className="panel-head"><h3>Workforce Coordinators</h3><span>{groups.reduce((sum, group) => sum + group.active, 0)} active</span></div>
+      <div className="panel-head"><h3>Workforce Coordinators</h3><span>{totalActive} on duty</span></div>
       <div className="workforce-group-list">
-        {groups.map((group) => (
-          <article className="workforce-group" key={group.coordinator}>
-            <header>
-              <IconTile Icon={Users} tone="violet" />
-              <div><b>{group.coordinator}</b><span>{group.coverage}</span></div>
-              <strong>{group.active}</strong>
-            </header>
-            {group.volunteers.map(([name, skill, assignment, status], index) => (
-              <div className="volunteer-row" key={name}>
-                <span>{name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>
-                <div><b>{name}</b><small>{skill} · {assignment}</small></div>
-                <em className={status === "On Duty" ? "on" : status === "Available" ? "available" : "break"}>{status}</em>
-              </div>
-            ))}
-          </article>
-        ))}
+        {groups.length === 0 && (
+          <p className="resource-empty-note">No workforce coordinator registered.</p>
+        )}
+        {groups.map((entry) => {
+          const onDuty = Number(
+            (entry.fields || []).find((field) => field.id === "volunteersOnDuty")?.value
+          );
+          return (
+            <article className="workforce-group" key={entry.coordinatorId}>
+              <header>
+                <IconTile Icon={Users} tone="violet" />
+                <div>
+                  <b>{entry.coordinatorName}</b>
+                  <span>
+                    {(entry.coverageNodes || []).join(", ") || entry.location || "Coverage pending"}
+                  </span>
+                </div>
+                <strong>{Number.isFinite(onDuty) ? onDuty : "—"}</strong>
+              </header>
+              {entry.reported && (entry.fields || []).length ? (
+                entry.fields.map((field) => <ResourceStockRow field={field} key={field.id} />)
+              ) : (
+                <p className="resource-empty-note">Awaiting first report from this coordinator.</p>
+              )}
+            </article>
+          );
+        })}
       </div>
     </section>
   );
