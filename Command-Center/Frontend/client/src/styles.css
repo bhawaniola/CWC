@@ -875,14 +875,215 @@ button {
 
 .map-canvas.image-map {
   background: #eef5ef;
+  /* height follows the artwork's aspect ratio so overlay markers
+     positioned in % always land exactly on the painted icons */
+  height: auto;
 }
 
-.map-canvas.image-map img {
+/* ---- live map overlay (markers, SOS pulses, routing beams) ---- */
+
+.live-map-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.live-map {
+  position: relative;
+  width: 100%;
+  line-height: 0;
+}
+
+.live-map img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.live-map-beams {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  display: block;
-  object-fit: cover;
-  object-position: center;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.live-map-beams .beam {
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.live-map-beams .beam.moving {
+  stroke: #f59e0b;
+  stroke-dasharray: 8 7;
+  animation: beam-flow 1s linear infinite;
+}
+
+.live-map-beams .beam.settled {
+  stroke: #0d9488;
+  opacity: .8;
+}
+
+@keyframes beam-flow {
+  to { stroke-dashoffset: -15; }
+}
+
+.live-node {
+  position: absolute;
+  z-index: 3;
+  width: 0;
+  height: 0;
+  cursor: help;
+}
+
+.node-ring {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .75), inset 0 0 0 1px rgba(255, 255, 255, .75);
+}
+
+.node-ring.pod {
+  width: 22px;
+  height: 22px;
+  border: 3px solid #10b981;
+}
+
+.node-ring.pod.teal { border-color: #10b981; }
+.node-ring.pod.orange { border-color: #f59e0b; }
+
+.node-ring.pod.red {
+  border-color: #ef4444;
+  animation: node-blink 1.1s ease-in-out infinite;
+}
+
+.node-ring.coordinator {
+  width: 17px;
+  height: 17px;
+  border: 2.5px solid #64748b;
+}
+
+.node-ring.role-hospital { border-color: #e11d48; }
+.node-ring.role-shelter { border-color: #ea580c; }
+.node-ring.role-workforce { border-color: #7c3aed; }
+.node-ring.role-fire { border-color: #b91c1c; }
+.node-ring.role-flood { border-color: #2563eb; }
+
+.node-ring.coordinator.busy {
+  animation: coordinator-glow 1.2s ease-in-out infinite;
+}
+
+.node-ring.tower {
+  width: 15px;
+  height: 15px;
+  border: 2.5px solid #10b981;
+}
+
+.node-ring.tower.teal { border-color: #10b981; }
+
+.node-ring.tower.red {
+  border-color: #ef4444;
+  animation: node-blink 1.1s ease-in-out infinite;
+}
+
+.node-ring.base {
+  width: 24px;
+  height: 24px;
+  border: 3px double #0d9488;
+}
+
+@keyframes node-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .25; }
+}
+
+@keyframes coordinator-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, .65); }
+  50% { box-shadow: 0 0 0 7px rgba(245, 158, 11, 0); }
+}
+
+.sos-pulse {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid currentColor;
+  animation: sos-pulse 1.35s ease-out infinite;
+  pointer-events: none;
+}
+
+@keyframes sos-pulse {
+  0% { transform: translate(-50%, -50%) scale(.3); opacity: .95; }
+  70% { opacity: .35; }
+  100% { transform: translate(-50%, -50%) scale(1.35); opacity: 0; }
+}
+
+.sos-count {
+  position: absolute;
+  top: -20px;
+  left: 7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, .4);
+}
+
+.live-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 2px 4px 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #5b6b7f;
+}
+
+.live-map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2.5px solid #10b981;
+}
+
+.legend-dot.teal { border-color: #10b981; }
+.legend-dot.orange { border-color: #f59e0b; }
+.legend-dot.red { border-color: #ef4444; }
+
+.legend-dot.pulse {
+  border-color: #dc2626;
+  animation: node-blink 1.35s ease-in-out infinite;
+}
+
+.legend-beam {
+  width: 18px;
+  height: 0;
+  border-top: 2.5px dashed #f59e0b;
+}
+
+.legend-beam.settled {
+  border-top-style: solid;
+  border-top-color: #0d9488;
+}
+
+.full-map-canvas .live-map-wrap {
+  min-width: 920px;
 }
 
 .map-canvas.zones {

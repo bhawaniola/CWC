@@ -591,8 +591,85 @@ function MetricCard({ Icon, tone, label, value, sub, points, imageSrc }) {
   );
 }
 
-function MapImage({ alt }) {
+// Percent positions of every painted icon on /assets/network-map.png
+// (1492x1054). Keys match the live ids used by pods, coordinator
+// deliveries and infra status, so map markers plug straight into the
+// same data the rest of the dashboard already receives.
+const MAP_NODES = {
+  "POD-01": { x: 39.1, y: 11.0, kind: "pod", label: "Pod 1" },
+  "POD-02": { x: 52.9, y: 9.7, kind: "pod", label: "Pod 2" },
+  "POD-03": { x: 68.5, y: 9.7, kind: "pod", label: "Pod 3" },
+  "POD-04": { x: 22.1, y: 42.9, kind: "pod", label: "Pod 4" },
+  "POD-05": { x: 36.6, y: 41.5, kind: "pod", label: "Pod 5" },
+  "POD-06": { x: 79.0, y: 42.8, kind: "pod", label: "Pod 6" },
+  "POD-07": { x: 26.5, y: 75.9, kind: "pod", label: "Pod 7" },
+  "POD-08": { x: 43.4, y: 84.0, kind: "pod", label: "Pod 8" },
+  "POD-09": { x: 74.3, y: 73.1, kind: "pod", label: "Pod 9" },
+  "POD-10": { x: 74.3, y: 89.3, kind: "pod", label: "Pod 10" },
+  "FIRE-01": { x: 48.4, y: 30.6, kind: "coordinator", role: "fire", label: "Fire Dept" },
+  "HOSPITAL-01": { x: 75.7, y: 22.2, kind: "coordinator", role: "hospital", label: "Hospital 1" },
+  "HOSPITAL-02": { x: 22.1, y: 59.7, kind: "coordinator", role: "hospital", label: "Hospital 2" },
+  "SHELTER-A": { x: 30.2, y: 22.7, kind: "coordinator", role: "shelter", label: "Shelter Camp A" },
+  "SHELTER-B": { x: 64.5, y: 38.3, kind: "coordinator", role: "shelter", label: "Shelter Camp B" },
+  "SHELTER-C": { x: 56.5, y: 73.3, kind: "coordinator", role: "shelter", label: "Shelter Camp C" },
+  "WORKFORCE-01": { x: 36.3, y: 61.6, kind: "coordinator", role: "workforce", label: "Workforce Camp 1" },
+  "WORKFORCE-02": { x: 64.1, y: 59.4, kind: "coordinator", role: "workforce", label: "Workforce Camp 2" },
+  "FLOOD-01": { x: 78.0, y: 57.5, kind: "coordinator", role: "flood", label: "Flood Rescue Dept" },
+  "CELLTOWER-1": { x: 52.3, y: 29.0, kind: "tower", label: "Cell Tower 1" },
+  "CELLTOWER-2": { x: 46.1, y: 66.5, kind: "tower", label: "Cell Tower 2" },
+  "BASE": { x: 50.9, y: 46.4, kind: "base", label: "Main Base Center" }
+};
+
+const SOS_PULSE_LIMIT = 10;
+const BEAM_LIMIT = 14;
+
+function sosSeverityColor(value) {
+  if (value >= 8) return "#dc2626";
+  if (value >= 6) return "#ea580c";
+  if (value >= 4) return "#f59e0b";
+  return "#eab308";
+}
+
+function LiveMap({ overview, requests, showLegend = true }) {
   const [failed, setFailed] = useState(false);
+  const pods = overview?.pods || [];
+  const deliveries = overview?.coordinatorDeliveries || [];
+  const infra = overview?.infra || {};
+  const podById = new Map(pods.map((pod) => [String(pod.podId || "").toUpperCase(), pod]));
+
+  const sourceRequests = (requests && requests.length ? requests : overview?.requests) || [];
+  const activeSos = sourceRequests
+    .filter((request) => isCitizenRequest(request) && !isResolvedRequest(request))
+    .sort((a, b) => requestTimeMs(b) - requestTimeMs(a))
+    .slice(0, SOS_PULSE_LIMIT);
+
+  const sosByPod = new Map();
+  for (const request of activeSos) {
+    const key = String(request.podId || "").toUpperCase();
+    if (!MAP_NODES[key]) continue;
+    const entry = sosByPod.get(key) || { count: 0, maxSeverity: 0 };
+    entry.count += 1;
+    entry.maxSeverity = Math.max(entry.maxSeverity, severity(request));
+    sosByPod.set(key, entry);
+  }
+
+  const requestPodById = new Map(
+    activeSos.map((request) => [request.id, String(request.podId || "").toUpperCase()])
+  );
+  const beams = [];
+  const busyCoordinators = new Set();
+  for (const delivery of deliveries) {
+    if (beams.length >= BEAM_LIMIT) break;
+    const from = MAP_NODES[requestPodById.get(delivery.requestId)];
+    const toKey = String(
+      delivery.targetCoordinatorId || delivery.coordinatorId || String(delivery.id || "").split(":")[1] || ""
+    ).toUpperCase();
+    const to = MAP_NODES[toKey];
+    if (!from || !to) continue;
+    const settled = ["delivered", "resolved"].includes(delivery.status);
+    beams.push({ id: delivery.id || `${delivery.requestId}:${toKey}`, from, to, settled });
+    if (!settled) busyCoordinators.add(toKey);
+  }
 
   if (failed) {
     return (
@@ -604,26 +681,84 @@ function MapImage({ alt }) {
     );
   }
 
-  return <img src="/assets/network-map.png" alt={alt} loading="lazy" onError={() => setFailed(true)} />;
+  return (
+    <div className="live-map-wrap">
+      <div className="live-map">
+        <img src="/assets/network-map.png" alt="SANJEEVANI live zone map" onError={() => setFailed(true)} />
+        <svg className="live-map-beams" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          {beams.map((beam) => (
+            <line
+              key={beam.id}
+              x1={beam.from.x}
+              y1={beam.from.y}
+              x2={beam.to.x}
+              y2={beam.to.y}
+              className={`beam ${beam.settled ? "settled" : "moving"}`}
+            />
+          ))}
+        </svg>
+        {Object.entries(MAP_NODES).map(([id, node]) => {
+          if (node.kind === "pod") {
+            const pod = podById.get(id);
+            const tone = pod ? podStatusTone(pod) : "teal";
+            const sos = sosByPod.get(id);
+            const status = pod ? (pod.reachable ? cap(pod.mode || "online") : "Offline") : "Awaiting data";
+            const queued = Number(pod?.queuedRequests || 0);
+            const hint = `${node.label} — ${status}${queued ? ` · ${queued} queued SOS` : ""}${sos ? ` · ${sos.count} active SOS` : ""}`;
+            return (
+              <span key={id} className="live-node" style={{ left: `${node.x}%`, top: `${node.y}%` }} title={hint}>
+                {sos && <i className="sos-pulse" style={{ color: sosSeverityColor(sos.maxSeverity) }} />}
+                <i className={`node-ring pod ${tone}`} />
+                {sos && sos.count > 1 && <b className="sos-count">{sos.count}</b>}
+              </span>
+            );
+          }
+          if (node.kind === "tower") {
+            const up = (id === "CELLTOWER-1" ? infra.celltower1 : infra.celltower2) === "up";
+            return (
+              <span key={id} className="live-node" style={{ left: `${node.x}%`, top: `${node.y}%` }} title={`${node.label} — ${up ? "Online" : "DOWN"}`}>
+                <i className={`node-ring tower ${up ? "teal" : "red"}`} />
+              </span>
+            );
+          }
+          if (node.kind === "base") {
+            return (
+              <span key={id} className="live-node" style={{ left: `${node.x}%`, top: `${node.y}%` }} title={`${node.label} — Command Center`}>
+                <i className="node-ring base" />
+              </span>
+            );
+          }
+          const busy = busyCoordinators.has(id);
+          return (
+            <span key={id} className="live-node" style={{ left: `${node.x}%`, top: `${node.y}%` }} title={`${node.label}${busy ? " — receiving SOS route" : ""}`}>
+              <i className={`node-ring coordinator role-${node.role} ${busy ? "busy" : ""}`} />
+            </span>
+          );
+        })}
+      </div>
+      {showLegend && (
+        <div className="live-map-legend">
+          <span><i className="legend-dot teal" /> Online</span>
+          <span><i className="legend-dot orange" /> Island / queued</span>
+          <span><i className="legend-dot red" /> Offline</span>
+          <span><i className="legend-dot pulse" /> Active SOS</span>
+          <span><i className="legend-beam moving" /> Routing</span>
+          <span><i className="legend-beam settled" /> Delivered</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
-function MapPanel({ title = "Pod & Shelter Locations", zones = false, onViewFullMap }) {
+function MapPanel({ title = "Pod & Shelter Locations", onViewFullMap, overview, requests }) {
   return (
     <section className="panel map-panel">
       <div className="panel-head">
         <h3>{title}</h3>
-        <button onClick={onViewFullMap}>View full map</button>
+        {onViewFullMap && <button onClick={onViewFullMap}>View full map</button>}
       </div>
-      <div className={`map-canvas image-map ${zones ? "zones" : ""}`}>
-        <MapImage alt="SANJEEVANI network zone map" />
-        {zones && (
-          <>
-            <strong className="zone z1">Zone 1</strong>
-            <strong className="zone z2">Zone 2</strong>
-            <strong className="zone z3">Zone 3</strong>
-            <strong className="zone z4">Zone 4</strong>
-          </>
-        )}
+      <div className="map-canvas image-map">
+        <LiveMap overview={overview} requests={requests} />
       </div>
     </section>
   );
@@ -1054,7 +1189,7 @@ function Dashboard({ overview, requests, setRoute }) {
 
         <div className="dashboard-col">
           <NetworkQuickPanel overview={overview} mode={mode} setRoute={setRoute} />
-          <MapPanel onViewFullMap={() => setFullMapOpen(true)} />
+          <MapPanel onViewFullMap={() => setFullMapOpen(true)} overview={overview} requests={requests} />
           <ActivityFeed logs={activityLogs} setRoute={setRoute} />
         </div>
       </div>
@@ -1067,7 +1202,7 @@ function Dashboard({ overview, requests, setRoute }) {
               <button onClick={() => setFullMapOpen(false)}>Close</button>
             </div>
             <div className="full-map-canvas">
-              <MapImage alt="SANJEEVANI full pod and shelter map" />
+              <LiveMap overview={overview} requests={requests} />
             </div>
           </section>
         </div>
@@ -1438,7 +1573,7 @@ function PodsPage({ overview }) {
           </div>
         </section>
 
-        <MapPanel title="Pod Network Map" onViewFullMap={() => setFullMapOpen(true)} />
+        <MapPanel title="Pod Network Map" onViewFullMap={() => setFullMapOpen(true)} overview={overview} />
       </div>
 
       {fullMapOpen && (
@@ -1449,7 +1584,7 @@ function PodsPage({ overview }) {
               <button onClick={() => setFullMapOpen(false)}>Close</button>
             </div>
             <div className="full-map-canvas">
-              <MapImage alt="SANJEEVANI full pod network map" />
+              <LiveMap overview={overview} />
             </div>
           </section>
         </div>
@@ -1555,7 +1690,7 @@ function NetworkPage({ overview, infraAction, restoreAll }) {
             <span>{mode.label}</span>
           </div>
           <div className="network-zone-map">
-            <img src="/assets/network-map.png" alt="SANJEEVANI zone network map" />
+            <LiveMap overview={overview} showLegend={false} />
             <span className={`map-signal satellite ${satelliteOnline ? "online" : "down"}`}><Satellite size={15} /> Satellite</span>
             <span className={`map-signal tower-one ${tower1Online ? "online" : "down"}`}><RadioTower size={15} /> Tower 1</span>
             <span className={`map-signal tower-two ${tower2Online ? "online" : "down"}`}><RadioTower size={15} /> Tower 2</span>
@@ -1833,7 +1968,7 @@ function SensorsPage({ overview }) {
           <div className="panel-head"><h3>Latest Sensor Readings</h3></div>
           <SensorReadingList readings={readings} limit={readings.length} />
         </section>
-        <MapPanel title="Flood Sensor Map" />
+        <MapPanel title="Flood Sensor Map" overview={overview} />
       </div>
     </div>
   );
