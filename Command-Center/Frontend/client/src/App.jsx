@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Clock,
   ClipboardList,
   Cloud,
   Crosshair,
@@ -33,7 +34,9 @@ import {
   Siren,
   Satellite,
   Sparkles,
+  Trash2,
   TrendingUp,
+  UserCheck,
   Users,
   Video,
   Waves,
@@ -110,7 +113,7 @@ function requestStatus(request) {
   if ((request?.routing?.targets || []).length) {
     return { label: "Assigned", tone: "blue" };
   }
-  return { label: "In Progress", tone: "blue" };
+  return { label: "Pending", tone: "orange" };
 }
 
 function isResolvedRequest(request) {
@@ -1219,6 +1222,14 @@ const requestFilters = [
   { key: "shelter", label: "Shelter", Icon: Home }
 ];
 
+const requestTypeIcons = {
+  medical: HeartPulse,
+  rescue: LifeBuoy,
+  supplies: Droplets,
+  shelter: Home,
+  all: Siren
+};
+
 function requestFilterKey(request) {
   const category = String(request.category || "").toLowerCase();
   if (/(medical|health|hospital)/.test(category)) return "medical";
@@ -1250,6 +1261,11 @@ function requestFilterKey(request) {
     return "shelter";
   }
   return "all";
+}
+
+function requestDisplayLocation(request) {
+  const raw = String(request.locationName || request.location || request.podName || "Varuna Hills");
+  return raw.split("|")[0].trim() || "Varuna Hills";
 }
 
 function deliveryForRequest(deliveries, request) {
@@ -1301,7 +1317,13 @@ function deliveryReason(delivery) {
 
 function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, focusRequestId, onRequestSeen, onDroneMission }) {
   const [activeFilter, setActiveFilter] = useState("all");
+  const [lifecycleFilter, setLifecycleFilter] = useState("all");
   const [view, setView] = useState("active");
+  const [requestSearch, setRequestSearch] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
+  const [criticalOnly, setCriticalOnly] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState("");
+  const [deletingIds, setDeletingIds] = useState(() => new Set());
   // Cards open collapsed: the board reads as a scannable queue, and the
   // routing/receipt detail lives behind a per-card Details toggle.
   const [expandedIds, setExpandedIds] = useState(() => new Set());
@@ -1315,10 +1337,16 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
       }
       return next;
     });
-  const sortedRequests = [...requests].sort((left, right) => requestTimeMs(right) - requestTimeMs(left));
-  const openRequests = sortedRequests.filter((request) => !isResolvedRequest(request));
-  const historyRequests = sortedRequests.filter(isResolvedRequest);
+  const baseRequests = [...requests];
+  const openRequests = baseRequests.filter((request) => !isResolvedRequest(request));
+  const historyRequests = baseRequests.filter(isResolvedRequest);
   const viewRequests = view === "history" ? historyRequests : openRequests;
+  const lifecycleCounts = requestLifecycleFilters.reduce((counts, filter) => {
+    counts[filter.key] = filter.key === "all"
+      ? openRequests.length
+      : openRequests.filter((request) => requestLifecycleKey(request) === filter.key).length;
+    return counts;
+  }, {});
   const filterCounts = requestFilters.reduce((counts, filter) => {
     counts[filter.key] =
       filter.key === "all"
@@ -1326,14 +1354,67 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
         : viewRequests.filter((request) => requestFilterKey(request) === filter.key).length;
     return counts;
   }, {});
-  const shown =
-    activeFilter === "all"
-      ? viewRequests
-      : viewRequests.filter((request) => requestFilterKey(request) === activeFilter);
+  const normalizedSearch = requestSearch.trim().toLowerCase();
+  const shown = viewRequests
+    .filter((request) => activeFilter === "all" || requestFilterKey(request) === activeFilter)
+    .filter((request) => view === "history" || lifecycleFilter === "all" || requestLifecycleKey(request) === lifecycleFilter)
+    .filter((request) => !criticalOnly || isCriticalRequest(request))
+    .filter((request) => {
+      if (!normalizedSearch) return true;
+      return [
+        request.id,
+        request.name,
+        request.category,
+        request.message,
+        request.locationName,
+        request.location,
+        request.podId,
+        request.triage?.reason
+      ].filter(Boolean).join(" ").toLowerCase().includes(normalizedSearch);
+    })
+    .sort((left, right) => {
+      if (sortBy === "severity") return severity(right) - severity(left) || requestTimeMs(right) - requestTimeMs(left);
+      if (sortBy === "oldest") return requestTimeMs(left) - requestTimeMs(right);
+      return requestTimeMs(right) - requestTimeMs(left);
+    });
+
+  const queueSummary = {
+    pending: openRequests.filter((request) => requestLifecycleKey(request) === "pending").length,
+    assigned: openRequests.filter((request) => requestLifecycleKey(request) === "assigned").length,
+    acknowledged: openRequests.filter((request) => requestLifecycleKey(request) === "acknowledged").length,
+    critical: openRequests.filter(isCriticalRequest).length
+  };
+
+  const handleDeleteRequest = async (requestId) => {
+    if (!requestId || deletingIds.has(requestId)) return;
+    if (confirmDeleteId !== requestId) {
+      setConfirmDeleteId(requestId);
+      return;
+    }
+
+    setDeletingIds((current) => new Set(current).add(requestId));
+    const deleted = await deleteRequest(requestId);
+    if (!deleted) {
+      setDeletingIds((current) => {
+        const next = new Set(current);
+        next.delete(requestId);
+        return next;
+      });
+    }
+    setConfirmDeleteId("");
+  };
+
+  useEffect(() => {
+    if (!confirmDeleteId) return undefined;
+    const timer = setTimeout(() => setConfirmDeleteId(""), 4500);
+    return () => clearTimeout(timer);
+  }, [confirmDeleteId]);
 
   useEffect(() => {
     if (!focusRequestId) return;
     setActiveFilter("all");
+    setLifecycleFilter("all");
+    setCriticalOnly(false);
     setView(
       requests.some((request) => request.id === focusRequestId && isResolvedRequest(request))
         ? "history"
@@ -1356,22 +1437,88 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
 
   return (
     <div className="page requests-only-page">
+      <div className="page-head requests-page-head">
+        <div>
+          <h2>Emergency Request Operations</h2>
+          <p>Prioritize incoming cases, track assignments, and follow each response through resolution.</p>
+        </div>
+        <button className="ghost-button" onClick={retryDeliveries}>Retry queued deliveries</button>
+      </div>
+
+      <div className="request-queue-summary">
+        {[
+          { key: "pending", label: "Pending triage", value: queueSummary.pending, detail: "Awaiting coordinator assignment", Icon: Clock, tone: "orange" },
+          { key: "assigned", label: "Assigned", value: queueSummary.assigned, detail: "Sent to response teams", Icon: Users, tone: "blue" },
+          { key: "acknowledged", label: "Acknowledged", value: queueSummary.acknowledged, detail: "Team confirmed response", Icon: UserCheck, tone: "teal" },
+          { key: "critical", label: "Critical active", value: queueSummary.critical, detail: "Severity 8 or higher", Icon: Siren, tone: "red" }
+        ].map(({ key, label, value, detail, Icon, tone }) => (
+          <button
+            className={`request-summary-card ${tone} ${view === "active" && (key === "critical" ? criticalOnly : lifecycleFilter === key && !criticalOnly) ? "active" : ""}`}
+            key={key}
+            onClick={() => {
+              setView("active");
+              setActiveFilter("all");
+              setLifecycleFilter(key === "critical" ? "all" : key);
+              setCriticalOnly(key === "critical");
+              if (key === "critical") setSortBy("severity");
+            }}
+          >
+            <span><Icon size={20} /></span>
+            <div><small>{label}</small><b>{value}</b><em>{detail}</em></div>
+          </button>
+        ))}
+      </div>
+
       <section className="panel requests-workbench">
         <div className="request-toolbar">
           <div className="view-switch">
-            <button className={view === "active" ? "active" : ""} onClick={() => setView("active")}>
+            <button className={view === "active" ? "active" : ""} onClick={() => { setView("active"); setLifecycleFilter("all"); setCriticalOnly(false); }}>
               <Siren size={16} />
-              Active
+              Active queue
               <b>{openRequests.length}</b>
             </button>
-            <button className={view === "history" ? "active" : ""} onClick={() => setView("history")}>
+            <button className={view === "history" ? "active" : ""} onClick={() => { setView("history"); setLifecycleFilter("all"); setCriticalOnly(false); }}>
               <CheckCircle2 size={16} />
-              Past history
+              Resolved history
               <b>{historyRequests.length}</b>
             </button>
           </div>
-          <button className="ghost-button" onClick={retryDeliveries}>Retry queued deliveries</button>
+          <span className="request-live-label"><i /> Realtime operations queue</span>
         </div>
+
+        {view === "active" ? (
+          <div className="request-lifecycle-filters">
+            {requestLifecycleFilters.map(({ key, label, Icon }) => (
+              <button
+                className={lifecycleFilter === key && !criticalOnly ? "active" : ""}
+                key={key}
+                onClick={() => { setLifecycleFilter(key); setCriticalOnly(false); }}
+              >
+                <Icon size={16} />
+                <span>{label}</span>
+                <b>{lifecycleCounts[key] || 0}</b>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="request-query-bar">
+          <label>
+            <Search size={17} />
+            <input
+              aria-label="Search requests"
+              placeholder="Search by person, request ID, location or message…"
+              value={requestSearch}
+              onChange={(event) => setRequestSearch(event.target.value)}
+            />
+          </label>
+          <select aria-label="Sort requests" value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+            <option value="newest">Newest first</option>
+            <option value="severity">Highest severity</option>
+            <option value="oldest">Oldest waiting</option>
+          </select>
+        </div>
+
         <div className="request-filter-bar">
           {requestFilters.map(({ key, label, Icon }) => (
             <button
@@ -1386,6 +1533,13 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
           ))}
         </div>
 
+        <div className="request-results-note">
+          <span>Showing <b>{shown.length}</b> of {viewRequests.length} {view === "active" ? "active" : "resolved"} requests</span>
+          {(activeFilter !== "all" || lifecycleFilter !== "all" || criticalOnly || requestSearch) ? (
+            <button onClick={() => { setActiveFilter("all"); setLifecycleFilter("all"); setCriticalOnly(false); setRequestSearch(""); }}>Clear filters</button>
+          ) : null}
+        </div>
+
         <div className="request-board">
           {shown.length ? shown.map((request) => {
             const requestDeliveries = deliveryForRequest(deliveries, request);
@@ -1398,42 +1552,66 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
             const targets = request.routing?.targets || [];
 
             const lifecycle = requestStatus(request);
+            const lifecycleKey = requestLifecycleKey(request);
+            const typeKey = requestFilterKey(request);
+            const TypeIcon = requestTypeIcons[typeKey] || Siren;
             const expanded = expandedIds.has(request.id);
+            const deleting = deletingIds.has(request.id);
+            const deleteArmed = confirmDeleteId === request.id;
 
             return (
               <article
-                className={`request-detail-card ${isResolvedRequest(request) ? "resolved" : ""} ${expanded ? "" : "collapsed"}`}
+                className={`request-detail-card lifecycle-${lifecycleKey} severity-${severityLabel(request).toLowerCase()} ${isResolvedRequest(request) ? "resolved" : ""} ${expanded ? "" : "collapsed"}`}
                 id={`request-${request.id}`}
                 key={request.id}
               >
                 <header>
-                  <div>
-                    <span className="req-id">#{String(request.id || "").replace(/-/g, "").slice(-6).toUpperCase()}</span>
-                    <h3>{request.name || cap(request.category || "Emergency Request")}</h3>
-                    <p className={expanded ? "" : "clamped"}>{request.message || "Emergency request routed to coordinators."}</p>
+                  <div className="request-card-title">
+                    <span className={`request-type-icon ${typeKey}`}><TypeIcon size={21} /></span>
+                    <div>
+                      <div className="request-card-kicker">
+                        <span className="req-id">#{String(request.id || "").replace(/-/g, "").slice(-6).toUpperCase()}</span>
+                        <span>{cap(typeKey)}</span>
+                        {request.podId ? <span>{request.podId}</span> : null}
+                      </div>
+                      <h3>{request.name || cap(request.category || "Emergency Request")}</h3>
+                      <p className={expanded ? "" : "clamped"}>{request.message || "Emergency request routed to coordinators."}</p>
+                    </div>
                   </div>
                   <div className="request-pills">
                     <span className={`soft-pill ${lifecycle.tone}`}>{lifecycle.label}</span>
                     <StatusPill request={request} />
+                    <button
+                      className={`delete-request-button ${deleteArmed ? "confirm" : ""}`}
+                      disabled={deleting}
+                      onClick={() => handleDeleteRequest(request.id)}
+                      title={deleteArmed ? "Click again to delete this request" : "Delete request"}
+                    >
+                      <Trash2 size={14} />
+                      {deleting ? "Deleting" : deleteArmed ? "Confirm" : "Delete"}
+                    </button>
                   </div>
                 </header>
 
-                <div className="request-summary-line">
-                  <span>
-                    {cap(requestFilterKey(request))} · {request.locationName || request.location || "Varuna Hills"} ·{" "}
-                    {delivered}/{total || 0} delivered · received {ago(request.cloudReceivedAt)}
-                  </span>
+                <div className="request-card-meta">
+                  <div>
+                    <span><MapPin size={14} /> {requestDisplayLocation(request)}</span>
+                    <span><Clock size={14} /> Received {ago(request.cloudReceivedAt)}</span>
+                    <span><Users size={14} /> {delivered}/{total || 0} coordinator deliveries</span>
+                  </div>
                   <button className="details-toggle" onClick={() => toggleExpanded(request.id)}>
                     {expanded ? "Hide details" : "Details"}
                     {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                   </button>
                 </div>
 
+                <RequestLifecycleTrack request={request} />
+
                 {expanded ? (
                   <>
                     <div className="request-detail-grid">
                       <div><span>Filter Type</span><b>{cap(requestFilterKey(request))}</b></div>
-                      <div><span>Location</span><b>{request.locationName || request.location || "Varuna Hills"}</b></div>
+                      <div><span>Location</span><b>{requestDisplayLocation(request)}</b></div>
                       <div><span>Departments</span><b>{departmentLabels.join(", ") || "Auto triage"}</b></div>
                       <div><span>Coordinator Delivery</span><b>{delivered} / {total || 0} sent</b></div>
                     </div>
@@ -1554,7 +1732,6 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
                           ? ` · closed ${ago(latestResolutionAt(request))}`
                           : ""}
                       </span>
-                      <button onClick={() => deleteRequest(request.id)}>Delete</button>
                     </footer>
                   </>
                 ) : null}
@@ -2149,6 +2326,37 @@ const droneMissionTypes = [
   { value: "aerial_relay", label: "Aerial Network Relay" }
 ];
 
+const requestLifecycleFilters = [
+  { key: "all", label: "All active", Icon: ClipboardList },
+  { key: "pending", label: "Pending", Icon: Clock },
+  { key: "assigned", label: "Assigned", Icon: Users },
+  { key: "acknowledged", label: "Acknowledged", Icon: UserCheck }
+];
+
+function requestLifecycleKey(request) {
+  const resolutions = Array.isArray(request?.resolutions) ? request.resolutions : [];
+  if (resolutions.some((item) => item.status === "resolved")) return "resolved";
+  if (resolutions.some((item) => item.status === "acknowledged")) return "acknowledged";
+  if ((request?.routing?.targets || []).length) return "assigned";
+  return "pending";
+}
+
+function RequestLifecycleTrack({ request }) {
+  const steps = ["pending", "assigned", "acknowledged", "resolved"];
+  const current = requestLifecycleKey(request);
+  const currentIndex = steps.indexOf(current);
+  return (
+    <div className="request-lifecycle-track" aria-label={`Request lifecycle: ${cap(current)}`}>
+      {steps.map((step, index) => (
+        <div className={`request-lifecycle-step ${index <= currentIndex ? "complete" : ""} ${step === current ? "current" : ""}`} key={step}>
+          <span>{index < currentIndex ? <CheckCircle2 size={13} /> : index + 1}</span>
+          <b>{cap(step)}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const activeDroneStates = new Set(["launching", "en_route", "on_station", "paused", "returning"]);
 
 function droneStatusTone(status) {
@@ -2596,11 +2804,17 @@ function App() {
 
   const deleteRequest = async (id) => {
     if (!id) return;
-    const result = await api(`/api/requests/${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (result.success) {
-      setRequests((current) => removeById(current, id));
-      setDeliveries((current) => current.filter((delivery) => delivery.requestId !== id));
+    try {
+      const result = await api(`/api/requests/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (result.success) {
+        setRequests((current) => removeById(current, id));
+        setDeliveries((current) => current.filter((delivery) => delivery.requestId !== id));
+        return true;
+      }
+    } catch (error) {
+      console.warn("Failed to delete request", error);
     }
+    return false;
   };
 
   const retryDeliveries = async () => {

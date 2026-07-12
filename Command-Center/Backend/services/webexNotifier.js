@@ -281,6 +281,19 @@ function notifyResourceSaturation(request, saturatedRoles = []) {
 
 function notifyDroneMission(mission, eventType = "mission:updated", drone = {}) {
   if (!mission?.id || eventType === "mission:telemetry") return;
+  // A mission produces telemetry and several internal transition events in a
+  // few seconds. Posting all of them would exhaust the shared emergency alert
+  // rate limit before the useful "on station" or "completed" message. Keep
+  // Webex focused on milestones operators actually need to act on.
+  const milestoneStatuses = new Set([
+    "requested",
+    "launching",
+    "on_station",
+    "completed",
+    "emergency_landed"
+  ]);
+  const payloadDelivered = mission.payloadStatus === "delivered";
+  if (!milestoneStatuses.has(mission.status) && !mission.relayActive && !payloadDelivered) return;
   const milestone = [mission.status, mission.payloadStatus, mission.relayActive ? "relay-on" : "relay-off"]
     .filter(Boolean)
     .join(":");
