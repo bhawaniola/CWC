@@ -2558,9 +2558,35 @@ function SensorsPage({ overview }) {
   );
 }
 
+const broadcastHazards = ["flood", "earthquake", "heatwave", "wildfire", "evacuation", "drill"];
+
 function AlertsPage({ overview, broadcast, unseenRequests, onOpenRequest }) {
   const alerts = overview.alerts?.length ? overview.alerts : [{ id: "alert-1", hazard: "Flood", message: "Flood escalation in Budameru basin.", issuedAt: new Date().toISOString() }];
   const security = overview.securityEvents?.length ? overview.securityEvents : [{ id: "sec-1", message: "No forged or replayed alerts detected.", cloudReceivedAt: new Date().toISOString() }];
+
+  const [hazard, setHazard] = useState("flood");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState(null);
+
+  const sendBroadcast = async () => {
+    const text = message.trim();
+    if (!text) {
+      setNotice({ ok: false, text: "Type a message before broadcasting." });
+      return;
+    }
+    setSending(true);
+    setNotice(null);
+    const result = await broadcast({ hazard, message: text });
+    setSending(false);
+    if (result?.success) {
+      setNotice({ ok: true, text: "Signed and broadcast to every pod." });
+      setMessage("");
+    } else {
+      setNotice({ ok: false, text: result?.message || "Broadcast failed." });
+    }
+  };
+
   return (
     <div className="page">
       <div className="page-head">
@@ -2568,8 +2594,33 @@ function AlertsPage({ overview, broadcast, unseenRequests, onOpenRequest }) {
           <h2>Alerts</h2>
           <p>Unseen requests, signed EOC broadcasts and security events across the network.</p>
         </div>
-        <button className="primary-button" onClick={broadcast}>Broadcast Alert</button>
       </div>
+
+      <section className="panel" style={{ marginBottom: 20 }}>
+        <div className="panel-head"><h3>Broadcast a signed alert</h3></div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", padding: "6px 2px 2px" }}>
+          <select
+            value={hazard}
+            onChange={(event) => setHazard(event.target.value)}
+            style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd8e5", fontWeight: 700, color: "#183a5f", background: "#fff" }}
+          >
+            {broadcastHazards.map((item) => <option value={item} key={item}>{cap(item)}</option>)}
+          </select>
+          <input
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter") sendBroadcast(); }}
+            placeholder="Message to broadcast to every pod…"
+            style={{ flex: 1, minWidth: 220, padding: "10px 12px", borderRadius: 10, border: "1px solid #cbd8e5", fontWeight: 400 }}
+          />
+          <button className="primary-button" onClick={sendBroadcast} disabled={sending}>
+            {sending ? "Signing…" : "Broadcast (Ed25519-signed)"}
+          </button>
+        </div>
+        {notice ? (
+          <p style={{ margin: "10px 2px 0", fontWeight: 700, color: notice.ok ? "#087c67" : "#bd2f4a" }}>{notice.text}</p>
+        ) : null}
+      </section>
       <div className="alert-layout alert-log-layout">
         <section className="panel">
           <div className="panel-head">
@@ -2833,11 +2884,14 @@ function App() {
     if (result.success) setOverview(result.data);
   };
 
-  const broadcast = async () => {
-    await api("/api/broadcast", {
+  const broadcast = async ({ hazard, message } = {}) => {
+    return api("/api/broadcast", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hazard: "drill", message: "Signed EOC test alert. No action needed." })
+      body: JSON.stringify({
+        hazard: hazard || "drill",
+        message: message || "Signed EOC test alert. No action needed."
+      })
     });
   };
 
