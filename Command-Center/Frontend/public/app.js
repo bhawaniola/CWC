@@ -1037,8 +1037,32 @@ function render() {
   document.querySelectorAll("#nav a").forEach((a) =>
     a.classList.toggle("active", a.getAttribute("href") === "#" + route));
 
+  // render() rebuilds the whole view via innerHTML, which destroys and
+  // recreates every element — including the broadcast <input id="al-msg">.
+  // A background realtime event (alert:created, sensor:updated, ...) firing
+  // mid-typing would otherwise wipe whatever the operator was writing. Save
+  // the value/cursor before the rebuild and restore them after.
+  const prev = document.getElementById("al-msg");
+  const savedMsg = prev ? prev.value : null;
+  const savedFocus = prev ? document.activeElement === prev : false;
+  const savedStart = prev ? prev.selectionStart : null;
+  const savedEnd = prev ? prev.selectionEnd : null;
+
   view.innerHTML = routes[route](overview);
   renderedRoute = route;
+
+  const next = document.getElementById("al-msg");
+  if (next && savedMsg !== null) {
+    next.value = savedMsg;
+    if (savedFocus) {
+      next.focus();
+      try {
+        next.setSelectionRange(savedStart, savedEnd);
+      } catch (error) {
+        // setSelectionRange can throw on some input types; safe to ignore.
+      }
+    }
+  }
 }
 window.addEventListener("hashchange", () => {
   renderedRoute = "";
