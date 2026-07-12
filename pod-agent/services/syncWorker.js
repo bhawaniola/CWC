@@ -84,7 +84,9 @@ function startSyncWorker({ calculateMode, forwardViaRoute, forwardBatchViaRoute,
           syncStatus:
             route.activePath === "cellular"
               ? "synced-after-reconnect-via-cellular"
-              : "synced-after-reconnect-via-satellite",
+              : route.activePath === "drone-relay"
+                ? "synced-via-aerial-drone-relay"
+                : "synced-after-reconnect-via-satellite",
           syncedAt: new Date().toISOString(),
           network: {
             ...(queuedRequest.network || {}),
@@ -151,7 +153,9 @@ function startSyncWorker({ calculateMode, forwardViaRoute, forwardBatchViaRoute,
             syncStatus:
               route.activePath === "cellular"
                 ? "synced-after-reconnect-via-cellular"
-                : "synced-after-reconnect-via-satellite",
+                : route.activePath === "drone-relay"
+                  ? "synced-via-aerial-drone-relay"
+                  : "synced-after-reconnect-via-satellite",
             syncedAt: new Date().toISOString()
           });
         } else if (route.mode === "mesh-relay" && route.relayPod) {

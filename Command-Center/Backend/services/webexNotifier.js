@@ -184,6 +184,30 @@ function saturationMarkdown(request, saturatedRoles) {
   return lines.join("\n");
 }
 
+function droneMissionMarkdown(mission, eventType, drone = {}) {
+  const labels = {
+    flood_survey: "Flood survey",
+    victim_search: "Victim search",
+    bridge_inspection: "Bridge inspection",
+    medical_payload: "Medical payload",
+    aerial_relay: "Aerial network relay"
+  };
+  const status = String(mission.status || eventType || "updated").replace(/_/g, " ").toUpperCase();
+  const lines = [`## 🚁 DRONE MISSION — ${status}`];
+  lines.push(`- **Mission:** ${labels[mission.type] || mission.title || mission.type || "Emergency response"}`);
+  lines.push(`- **Aircraft:** ${mission.assignedDroneId || drone.id || "Awaiting assignment"}`);
+  lines.push(`- **Target:** ${mission.target?.label || mission.target?.podId || "Pending"}${mission.target?.podId ? ` (${mission.target.podId})` : ""}`);
+  if (mission.incidentId) lines.push(`- **Incident:** ${mission.incidentId}`);
+  if (Number.isFinite(Number(drone.battery))) lines.push(`- **Battery:** ${Math.round(Number(drone.battery))}%`);
+  if (mission.relayActive) lines.push(`- **Network:** ${mission.target?.podId || "Target pod"} connected through aerial relay`);
+  if (mission.payloadStatus === "delivered") lines.push("- **Payload:** Emergency medical payload delivered");
+  const finding = Array.isArray(mission.findings) ? mission.findings[mission.findings.length - 1] : null;
+  if (finding?.message) lines.push(`- **Finding:** ${finding.message}`);
+  if (mission.videoUrl) lines.push(`- **Live feed:** [Open drone video](${mission.videoUrl})`);
+  lines.push(`- **Time:** ${timestampLine()}`);
+  return lines.join("\n");
+}
+
 function queueRetry(key, markdown, attempts) {
   if (attempts >= MAX_RETRY_ATTEMPTS || retryQueue.length >= MAX_RETRY_QUEUE) {
     console.warn(`[cloud-api][webex] alert ${key} dropped after ${attempts} attempt(s)`);
@@ -255,6 +279,14 @@ function notifyResourceSaturation(request, saturatedRoles = []) {
   notify(`saturation:${request.id}`, saturationMarkdown(request, saturatedRoles)).catch(() => {});
 }
 
+function notifyDroneMission(mission, eventType = "mission:updated", drone = {}) {
+  if (!mission?.id || eventType === "mission:telemetry") return;
+  const milestone = [mission.status, mission.payloadStatus, mission.relayActive ? "relay-on" : "relay-off"]
+    .filter(Boolean)
+    .join(":");
+  notify(`drone:${mission.id}:${milestone}`, droneMissionMarkdown(mission, eventType, drone)).catch(() => {});
+}
+
 async function sendTestAlert() {
   const markdown = [
     "## ✅ SANJEEVANI test alert",
@@ -298,6 +330,7 @@ module.exports = {
   notifyCriticalRequest,
   notifyEarlyWarning,
   notifyResourceSaturation,
+  notifyDroneMission,
   sendTestAlert,
   webexHealth
 };

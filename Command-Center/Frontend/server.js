@@ -22,6 +22,8 @@ const CONTROLLER_URL = normalizeUrl(
 );
 const INFRA_CONTROL_KEY = process.env.INFRA_CONTROL_KEY || "sanjeevani-infra-demo-key";
 const CONTROLLER_AUTH_HEADERS = { "x-infra-token": INFRA_CONTROL_KEY };
+const DRONE_CONTROL_KEY = process.env.DRONE_CONTROL_KEY || "sanjeevani-drone-demo-key";
+const DRONE_AUTH_HEADERS = { "x-drone-control-token": DRONE_CONTROL_KEY };
 const POD_URLS = String(process.env.POD_URLS || "")
   .split(",")
   .map((entry) => entry.trim())
@@ -163,6 +165,25 @@ async function fetchPods() {
   );
 }
 
+function applyActiveDroneRelays(pods, missions = []) {
+  const relays = new Map(
+    missions
+      .filter((mission) => mission.type === "aerial_relay" && mission.relayActive)
+      .map((mission) => [String(mission.target?.podId || "").toUpperCase(), mission])
+  );
+  return pods.map((pod) => {
+    const relay = relays.get(String(pod.podId || "").toUpperCase());
+    if (!relay) return pod;
+    return {
+      ...pod,
+      mode: "drone-relay",
+      activePath: "drone-relay",
+      relayDrone: relay.assignedDroneId,
+      relayMissionId: relay.id
+    };
+  });
+}
+
 function requestTimeMs(request) {
   const value = request.cloudReceivedAt || request.createdAt || request.receivedAt || request.timestamp;
   const ms = value ? new Date(value).getTime() : NaN;
@@ -184,19 +205,24 @@ function isCriticalRequest(request) {
 // ---- aggregation endpoints (real data fanned out from the cluster) ----
 
 app.get("/api/overview", async (req, res) => {
-  const [cloud, requestsPayload, alertsPayload, infraPayload, sensorPayload, pods] = await Promise.all([
+  const [cloud, requestsPayload, alertsPayload, infraPayload, sensorPayload, rawPods, dronesPayload, missionsPayload] = await Promise.all([
     getJson(`${CLOUD_URL}/api/health`),
     getJson(`${CLOUD_URL}/api/requests`),
     getJson(`${CLOUD_URL}/api/alerts`),
     getJson(`${CONTROLLER_URL}/api/infra/status`),
     getJson(`${CLOUD_URL}/api/sensors`),
-    fetchPods()
+    fetchPods(),
+    getJson(`${CLOUD_URL}/api/drones`),
+    getJson(`${CLOUD_URL}/api/drone-missions`)
   ]);
 
   const requests = requestsPayload?.data || [];
   const alerts = alertsPayload?.data || [];
   const infra = infraPayload?.data || {};
   const sensors = sensorPayload?.data || {};
+  const drones = dronesPayload?.data || [];
+  const droneMissions = missionsPayload?.data || [];
+  const pods = applyActiveDroneRelays(rawPods, droneMissions);
   const deliveriesPayload = await getJson(`${CLOUD_URL}/api/coordinator-deliveries`);
   const coordinatorDeliveries = deliveriesPayload?.data || [];
 
@@ -237,7 +263,11 @@ app.get("/api/overview", async (req, res) => {
           (delivery) => !["delivered", "resolved", "rejected"].includes(delivery.status)
         ).length,
         islandPods: islandCount,
-        alerts: alerts.length
+        alerts: alerts.length,
+        availableDrones: drones.filter((drone) => drone.status === "ready").length,
+        activeDroneMissions: droneMissions.filter((mission) =>
+          ["launching", "en_route", "on_station", "paused", "returning"].includes(mission.status)
+        ).length
       },
       infra,
       pods,
@@ -247,7 +277,9 @@ app.get("/api/overview", async (req, res) => {
       sensorSummary: sensors.summary || null,
       earlyWarnings: requests.filter((r) => r.category === "EARLY-WARNING").slice(0, 5),
       securityEvents: requests.filter((r) => r.category === "SECURITY").slice(0, 5),
-      alerts: alerts.slice(0, 8)
+      alerts: alerts.slice(0, 8),
+      drones,
+      droneMissions
     }
   });
 });
@@ -393,6 +425,47 @@ app.post("/api/broadcast", async (req, res) => {
     res.json({ success: true, data: response.data });
   } catch (error) {
     res.status(502).json({ success: false, message: error.message });
+  }
+});
+
+app.get("/api/drones", async (req, res) => {
+  const payload = await getJson(`${CLOUD_URL}/api/drones`, 4000);
+  res.json(payload || { success: true, data: [], providerReachable: false });
+});
+
+app.get("/api/drone-missions", async (req, res) => {
+  const payload = await getJson(`${CLOUD_URL}/api/drone-missions`, 5000);
+  res.json(payload || { success: true, data: [], providerReachable: false });
+});
+
+app.post("/api/drone-missions", async (req, res) => {
+  try {
+    const response = await axios.post(`${CLOUD_URL}/api/drone-missions`, req.body || {}, {
+      timeout: 8000,
+      headers: DRONE_AUTH_HEADERS
+    });
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 503).json({
+      success: false,
+      message: error.response?.data?.message || error.message
+    });
+  }
+});
+
+app.post("/api/drone-missions/:id/:action", async (req, res) => {
+  try {
+    const response = await axios.post(
+      `${CLOUD_URL}/api/drone-missions/${encodeURIComponent(req.params.id)}/${encodeURIComponent(req.params.action)}`,
+      req.body || {},
+      { timeout: 8000, headers: DRONE_AUTH_HEADERS }
+    );
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 503).json({
+      success: false,
+      message: error.response?.data?.message || error.message
+    });
   }
 });
 

@@ -865,6 +865,30 @@ app.post("/api/sync", async (req, res) => {
   res.json(result);
 });
 
+app.post("/api/drone-relay/:state", async (req, res) => {
+  const expectedToken = String(process.env.DRONE_CONTROL_KEY || "sanjeevani-drone-demo-key");
+  if (req.get("x-drone-relay-token") !== expectedToken) {
+    return res.status(403).json({ success: false, message: "Drone relay authorization failed." });
+  }
+  const enabled = req.params.state === "enable";
+  if (!enabled && req.params.state !== "disable") {
+    return res.status(400).json({ success: false, message: "Relay state must be enable or disable." });
+  }
+  const relay = connectivity.setDroneRelay({
+    enabled,
+    url: req.body?.url,
+    missionId: req.body?.missionId,
+    droneId: req.body?.droneId,
+    activatedAt: req.body?.activatedAt
+  });
+  const status = await connectivity.buildPodStatus();
+  console.log(
+    `[pod-agent] ${status.podId} aerial relay ${enabled ? "enabled" : "disabled"}: ${relay.droneId || "none"}`
+  );
+  res.json({ success: true, data: { relay, status } });
+  if (enabled) triggerQueueSync("drone-relay-enabled");
+});
+
 app.post("/api/hazards/reset", requireManagerAccess, (req, res) => {
   hazardPacks.resetHazards();
   res.json({

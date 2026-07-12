@@ -19,6 +19,8 @@ const podInfo = {
 
 const HEALTH_POLL_INTERVAL_MS = Number(process.env.HEALTH_POLL_INTERVAL_MS || 5000);
 const MESH_RELAY_LOG_INTERVAL_MS = Number(process.env.MESH_RELAY_LOG_INTERVAL_MS || 60000);
+const DRONE_CONTROL_KEY = String(process.env.DRONE_CONTROL_KEY || "sanjeevani-drone-demo-key");
+let droneRelay = { enabled: false, url: "", missionId: "", droneId: "", activatedAt: "" };
 let healthPollTimer = null;
 let healthPollPromise = null;
 const healthChangeListeners = new Set();
@@ -43,8 +45,26 @@ const ciscoSimulation = {
   cellular: "Cisco Meraki MG cellular backhaul represented by CELLTOWER-1 and CELLTOWER-2",
   mesh: "Cisco URWB pod-to-pod relay path",
   localWifi: "Meraki MR captive portal for citizens submitting SOS requests",
-  sensors: "Meraki MT style hazard inputs for flood, heat, and earthquake drills"
+  sensors: "Meraki MT style hazard inputs for flood, heat, and earthquake drills",
+  aerialRelay: "Drone-mounted temporary IP relay forwarding queued pod traffic"
 };
+
+function setDroneRelay(next = {}) {
+  const enabled = next.enabled === true;
+  if (!enabled && next.missionId && droneRelay.missionId && next.missionId !== droneRelay.missionId) {
+    return { ...droneRelay };
+  }
+  droneRelay = enabled
+    ? {
+        enabled: true,
+        url: normalizeUrl(next.url),
+        missionId: next.missionId || "",
+        droneId: next.droneId || "",
+        activatedAt: next.activatedAt || new Date().toISOString()
+      }
+    : { enabled: false, url: "", missionId: "", droneId: "", activatedAt: "" };
+  return { ...droneRelay };
+}
 
 function normalizeUrl(url) {
   return String(url || "").trim().replace(/\/+$/, "");
@@ -483,6 +503,26 @@ async function calculateMode(options = {}) {
     }
   }
 
+  // A deployed aircraft is an emergency backhaul after every usable direct
+  // link but before pod-to-pod mesh. It behaves like a temporary link-node,
+  // so the existing queue worker can forward and batch without special cases.
+  if (droneRelay.enabled && droneRelay.url && (await readLinkHealth(droneRelay.url)) === "up") {
+    return {
+      ...base,
+      mode: "cloud",
+      activePath: "drone-relay",
+      activeLink: {
+        name: droneRelay.droneId || "aerial-relay",
+        type: "drone-relay",
+        url: droneRelay.url,
+        token: DRONE_CONTROL_KEY
+      },
+      activeCellTower: null,
+      relayPod: null,
+      relayDrone: { ...droneRelay }
+    };
+  }
+
   if (allowMeshRelay && networkState.meshEnabled && podInfo.neighbors.length > 0) {
     const relayRoute = await findMeshRelay(base);
     if (relayRoute) {
@@ -506,6 +546,7 @@ async function buildPodStatus(options = {}) {
     activeCellTower: route.activeCellTower,
     relayPod: route.relayPod,
     relayPods: route.relayPods || [],
+    relayDrone: route.relayDrone || (droneRelay.enabled ? { ...droneRelay } : null),
     satelliteStatus: route.satelliteStatus,
     cellularStatus: route.cellularStatus,
     cellTowerStatuses: route.cellTowerStatuses,
@@ -548,7 +589,8 @@ async function forwardViaRoute(route, request) {
   }
 
   const response = await axios.post(`${route.activeLink.url}/api/forward`, request, {
-    timeout: 2500
+    timeout: 2500,
+    headers: route.activeLink.token ? { "x-drone-relay-token": route.activeLink.token } : undefined
   });
   return response.data;
 }
@@ -688,7 +730,10 @@ async function forwardBatchViaRoute(route, requestsForSync) {
   const response = await axios.post(
     `${route.activeLink.url}/api/forward-batch`,
     { requests: requestsForSync },
-    { timeout: 8000 }
+    {
+      timeout: 8000,
+      headers: route.activeLink.token ? { "x-drone-relay-token": route.activeLink.token } : undefined
+    }
   );
   return response.data;
 }
@@ -760,6 +805,7 @@ module.exports = {
   sendPodAlert,
   sendSecurityEvent,
   sendToRelay,
+  setDroneRelay,
   startEnrollment,
   startHealthPolling,
   verifyAlert,

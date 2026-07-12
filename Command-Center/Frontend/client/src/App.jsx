@@ -3,6 +3,7 @@ import { io } from "socket.io-client";
 import {
   Activity,
   AlertTriangle,
+  BatteryCharging,
   Bell,
   Boxes,
   CheckCircle2,
@@ -10,6 +11,7 @@ import {
   ChevronUp,
   ClipboardList,
   Cloud,
+  Crosshair,
   Database,
   Droplets,
   Gauge,
@@ -17,8 +19,15 @@ import {
   Home,
   LifeBuoy,
   MapPin,
+  MapPinned,
   Network,
+  Package,
+  Pause,
+  Plane,
+  Play,
   RadioTower,
+  RotateCcw,
+  Router,
   Search,
   Shield,
   Siren,
@@ -26,6 +35,7 @@ import {
   Sparkles,
   TrendingUp,
   Users,
+  Video,
   Waves,
   Wifi,
   WifiOff,
@@ -39,6 +49,7 @@ const navItems = [
   { path: "/pods", label: "Pods", Icon: RadioTower },
   { path: "/network", label: "Network", Icon: Network },
   { path: "/sensors", label: "Sensors", Icon: Activity },
+  { path: "/drones", label: "Aerial Ops", Icon: Plane, badge: "drones" },
   { path: "/resources", label: "Resources", Icon: Home },
   { path: "/volunteers", label: "Volunteers", Icon: Users },
   { path: "/alerts", label: "Alerts", Icon: Bell, badge: "alerts" }
@@ -544,6 +555,9 @@ function Sidebar({ route, setRoute, counts, mode }) {
               )}
               {badge === "alerts" && (counts.alerts || 0) > 0 && (
                 <em className="ml-auto grid h-[22px] min-w-[22px] place-items-center rounded-full bg-brand-red text-[11px] not-italic text-white">{counts.alerts}</em>
+              )}
+              {badge === "drones" && (counts.activeDroneMissions || 0) > 0 && (
+                <em className="ml-auto grid h-[22px] min-w-[22px] place-items-center rounded-full bg-[#3fd2d0] text-[11px] not-italic text-[#062246]">{counts.activeDroneMissions}</em>
               )}
             </button>
           );
@@ -1285,7 +1299,7 @@ function deliveryReason(delivery) {
   return delivery.lastReason || latest?.reason || (delivery.status === "queued" ? "Stored locally until satellite or matching cell tower is online." : "");
 }
 
-function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, focusRequestId, onRequestSeen }) {
+function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, focusRequestId, onRequestSeen, onDroneMission }) {
   const [activeFilter, setActiveFilter] = useState("all");
   const [view, setView] = useState("active");
   // Cards open collapsed: the board reads as a scannable queue, and the
@@ -1516,6 +1530,21 @@ function RequestsPage({ requests, deliveries, deleteRequest, retryDeliveries, fo
                         </span>
                       )}
                     </div>
+
+                    {!isResolvedRequest(request) ? (
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#bcd9f6] bg-[#eef7ff] p-4">
+                        <div>
+                          <b className="block text-sm text-[#123b67]">Need an aerial view?</b>
+                          <small className="text-[#5e7590]">Create a linked drone mission using this incident and pod location.</small>
+                        </div>
+                        <button
+                          className="inline-flex items-center gap-2 rounded-xl bg-[#1768d8] px-4 py-2.5 text-sm font-bold text-white shadow-[0_8px_18px_rgba(23,104,216,.22)]"
+                          onClick={() => onDroneMission?.(request)}
+                        >
+                          <Plane size={16} /> Request drone
+                        </button>
+                      </div>
+                    ) : null}
 
                     <footer>
                       <span>
@@ -2112,6 +2141,189 @@ function WorkforceCoordinatorPanel({ groups }) {
   );
 }
 
+const droneMissionTypes = [
+  { value: "flood_survey", label: "Flood Survey" },
+  { value: "victim_search", label: "Victim Search" },
+  { value: "bridge_inspection", label: "Bridge Inspection" },
+  { value: "medical_payload", label: "Medical Payload Drop" },
+  { value: "aerial_relay", label: "Aerial Network Relay" }
+];
+
+const activeDroneStates = new Set(["launching", "en_route", "on_station", "paused", "returning"]);
+
+function droneStatusTone(status) {
+  if (["ready", "completed", "approved"].includes(status)) return "bg-[#e4faf3] text-[#087c67]";
+  if (["launching", "en_route", "on_station", "returning"].includes(status)) return "bg-[#e5f0ff] text-[#1768d8]";
+  if (["emergency_landed", "failed"].includes(status)) return "bg-[#ffe7eb] text-[#c72f4c]";
+  return "bg-[#fff3d8] text-[#a76300]";
+}
+
+function missionLabel(type) {
+  return droneMissionTypes.find((item) => item.value === type)?.label || cap(type || "Mission");
+}
+
+function AerialOperationsPage() {
+  const [drones, setDrones] = useState([]);
+  const [missions, setMissions] = useState([]);
+  const [providerReachable, setProviderReachable] = useState(true);
+  const [missionType, setMissionType] = useState("flood_survey");
+  const [targetPod, setTargetPod] = useState("POD-04");
+  const [selectedDroneId, setSelectedDroneId] = useState("");
+  const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState(null);
+
+  const load = useCallback(async () => {
+    const [fleetResult, missionResult] = await Promise.all([api("/api/drones"), api("/api/drone-missions")]);
+    if (fleetResult.success) setDrones(fleetResult.data || []);
+    if (missionResult.success) setMissions(missionResult.data || []);
+    setProviderReachable(fleetResult.providerReachable !== false && missionResult.providerReachable !== false);
+  }, []);
+
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 2500);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  const createMission = async () => {
+    setBusy("create");
+    setNotice(null);
+    const result = await api("/api/drone-missions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: missionType,
+        target: { podId: targetPod },
+        assignedDroneId: selectedDroneId || undefined,
+        requestedBy: { role: "command-center", name: "EOC Admin" }
+      })
+    });
+    setBusy("");
+    setNotice({ ok: result.success, text: result.success ? `${result.data.id} created and awaiting approval.` : result.message });
+    if (result.success) await load();
+  };
+
+  const missionAction = async (mission, action) => {
+    setBusy(`${mission.id}:${action}`);
+    setNotice(null);
+    const result = await api(`/api/drone-missions/${encodeURIComponent(mission.id)}/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(action === "launch" && selectedDroneId ? { droneId: selectedDroneId } : {})
+    });
+    setBusy("");
+    setNotice({ ok: result.success, text: result.success ? `${mission.id}: ${cap(action)} accepted.` : result.message });
+    if (result.success) await load();
+  };
+
+  const activeMissions = missions.filter((mission) => activeDroneStates.has(mission.status));
+  const selectedMission = activeMissions[0] || missions[0];
+  const videoDrone = drones.find((drone) => drone.id === selectedMission?.assignedDroneId) || drones.find((drone) => drone.status !== "charging") || drones[0];
+  const readyDrones = drones.filter((drone) => drone.status === "ready").length;
+  const relayMission = missions.find((mission) => mission.type === "aerial_relay" && mission.relayActive);
+
+  return (
+    <div className="page space-y-5">
+      <div className="page-head">
+        <div>
+          <h2>Aerial Operations</h2>
+          <p>Shared drone command, telemetry, emergency payloads, and aerial network restoration.</p>
+        </div>
+        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-black ${providerReachable ? "bg-[#e4faf3] text-[#087c67]" : "bg-[#ffe7eb] text-[#c72f4c]"}`}>
+          <span className={`h-2 w-2 rounded-full ${providerReachable ? "bg-[#16b99a]" : "bg-[#e23b5b]"}`} />
+          {providerReachable ? "DRONE SERVICE ONLINE" : "DRONE SERVICE OFFLINE"}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-4 gap-4 max-[1100px]:grid-cols-2 max-[650px]:grid-cols-1">
+        {[
+          ["Fleet", drones.length, `${readyDrones} ready`, Plane, "#1768d8"],
+          ["Active missions", activeMissions.length, `${missions.length} total`, Crosshair, "#8b5cf6"],
+          ["Average battery", drones.length ? `${Math.round(drones.reduce((sum, drone) => sum + Number(drone.battery || 0), 0) / drones.length)}%` : "—", "live telemetry", BatteryCharging, "#16a085"],
+          ["Aerial relay", relayMission ? "ONLINE" : "STANDBY", relayMission ? `${relayMission.target?.podId} via ${relayMission.assignedDroneId}` : "no relay deployed", Router, "#e48b18"]
+        ].map(([label, value, sub, Icon, color]) => (
+          <section className="rounded-2xl border border-[#dfe8f2] bg-white p-5 shadow-[0_10px_25px_rgba(25,60,100,.06)]" key={label}>
+            <div className="mb-4 flex items-center justify-between"><span className="text-sm font-bold text-[#6b8198]">{label}</span><span className="grid h-10 w-10 place-items-center rounded-xl text-white" style={{ background: color }}><Icon size={19} /></span></div>
+            <b className="block text-2xl text-[#102f52]">{value}</b><small className="text-[#7c91a6]">{sub}</small>
+          </section>
+        ))}
+      </div>
+
+      {notice ? <div className={`rounded-xl border px-4 py-3 text-sm font-bold ${notice.ok ? "border-[#a7e8d8] bg-[#eafaf5] text-[#087c67]" : "border-[#ffc3cf] bg-[#fff0f3] text-[#bd2f4a]"}`}>{notice.text}</div> : null}
+
+      <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(340px,.9fr)] gap-5 max-[1050px]:grid-cols-1">
+        <section className="rounded-2xl border border-[#dfe8f2] bg-white p-5 shadow-[0_10px_25px_rgba(25,60,100,.06)]">
+          <div className="mb-5 flex items-center justify-between"><div><h3 className="m-0 text-lg text-[#102f52]">Launch a mission</h3><p className="mt-1 text-sm text-[#71879d]">Every mission starts pending and needs explicit EOC approval.</p></div><MapPinned className="text-[#1768d8]" /></div>
+          <div className="grid grid-cols-3 gap-3 max-[720px]:grid-cols-1">
+            <label className="grid gap-1.5 text-xs font-black uppercase tracking-wide text-[#6b8198]">Mission type
+              <select className="rounded-xl border border-[#cbd8e5] bg-white px-3 py-3 text-sm font-bold normal-case tracking-normal text-[#183a5f]" value={missionType} onChange={(event) => setMissionType(event.target.value)}>
+                {droneMissionTypes.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-xs font-black uppercase tracking-wide text-[#6b8198]">Target pod
+              <select className="rounded-xl border border-[#cbd8e5] bg-white px-3 py-3 text-sm font-bold normal-case tracking-normal text-[#183a5f]" value={targetPod} onChange={(event) => setTargetPod(event.target.value)}>
+                {Array.from({ length: 10 }, (_, index) => `POD-${String(index + 1).padStart(2, "0")}`).map((pod) => <option value={pod} key={pod}>{pod}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-xs font-black uppercase tracking-wide text-[#6b8198]">Preferred aircraft
+              <select className="rounded-xl border border-[#cbd8e5] bg-white px-3 py-3 text-sm font-bold normal-case tracking-normal text-[#183a5f]" value={selectedDroneId} onChange={(event) => setSelectedDroneId(event.target.value)}>
+                <option value="">Auto assign</option>
+                {drones.map((drone) => <option value={drone.id} key={drone.id}>{drone.id} · {Math.round(drone.battery)}% · {cap(drone.status)}</option>)}
+              </select>
+            </label>
+          </div>
+          <button disabled={busy === "create" || !providerReachable} onClick={createMission} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#1768d8] to-[#0d7bdc] px-5 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50"><Plane size={17} />{busy === "create" ? "Creating…" : "Create mission request"}</button>
+        </section>
+
+        <section className="overflow-hidden rounded-2xl border border-[#173f63] bg-[#061827] shadow-[0_12px_30px_rgba(6,24,39,.22)]">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 text-white"><div className="flex items-center gap-2"><Video size={17} className="text-[#65f3dc]" /><b>{videoDrone?.id || "No aircraft"} live feed</b></div><span className="text-xs font-black text-[#ff7184]">● LIVE</span></div>
+          {videoDrone?.videoUrl ? <iframe title={`${videoDrone.id} simulated live feed`} src={videoDrone.videoUrl} className="h-[260px] w-full border-0" /> : <div className="grid h-[260px] place-items-center text-sm text-[#80a0b8]">Video becomes available when the provider is online.</div>}
+        </section>
+      </div>
+
+      <section className="rounded-2xl border border-[#dfe8f2] bg-white p-5 shadow-[0_10px_25px_rgba(25,60,100,.06)]">
+        <div className="mb-4 flex items-center justify-between"><div><h3 className="m-0 text-lg text-[#102f52]">Drone fleet</h3><p className="mt-1 text-sm text-[#71879d]">Provider-normalized aircraft, payload, and signal state.</p></div><span className="live-dot">Live</span></div>
+        <div className="grid grid-cols-3 gap-4 max-[1050px]:grid-cols-1">
+          {drones.map((drone) => (
+            <article className="rounded-2xl border border-[#dce7f1] bg-[#f8fbfe] p-4" key={drone.id}>
+              <div className="flex items-start justify-between"><div><b className="block text-lg text-[#123b67]">{drone.id}</b><small className="text-[#72879d]">{drone.location?.label || drone.connectedPodId}</small></div><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${droneStatusTone(drone.status)}`}>{cap(drone.status)}</span></div>
+              <div className="my-4 h-2 overflow-hidden rounded-full bg-[#dce6ef]"><span className={`block h-full rounded-full ${drone.battery < 35 ? "bg-[#e23b5b]" : "bg-[#18b99b]"}`} style={{ width: `${Math.max(0, Math.min(100, drone.battery))}%` }} /></div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm"><span className="text-[#758ba0]">Battery</span><b className="text-right text-[#183a5f]">{Math.round(drone.battery)}%</b><span className="text-[#758ba0]">Altitude</span><b className="text-right text-[#183a5f]">{Math.round(drone.altitude)} m</b><span className="text-[#758ba0]">Signal</span><b className="text-right text-[#183a5f]">{Math.round(drone.signal)}%</b><span className="text-[#758ba0]">Payload</span><b className="text-right text-[#183a5f]">{cap(drone.payload?.type)}</b></div>
+            </article>
+          ))}
+          {!drones.length ? <div className="col-span-full rounded-xl border border-dashed border-[#c8d6e4] p-8 text-center text-[#71879d]">No aircraft reported by the drone provider.</div> : null}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-[#dfe8f2] bg-white p-5 shadow-[0_10px_25px_rgba(25,60,100,.06)]">
+        <div className="mb-4"><h3 className="m-0 text-lg text-[#102f52]">Mission control</h3><p className="mt-1 text-sm text-[#71879d]">Approval, flight milestones, findings, payload, and network-relay state.</p></div>
+        <div className="grid gap-3">
+          {missions.map((mission) => {
+            const actionBusy = busy.startsWith(`${mission.id}:`);
+            return (
+              <article className="rounded-2xl border border-[#dce7f1] p-4" key={mission.id}>
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><b className="text-[#123b67]">{missionLabel(mission.type)}</b><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${droneStatusTone(mission.status)}`}>{cap(mission.status)}</span>{mission.relayActive ? <span className="rounded-full bg-[#e5f8ff] px-2.5 py-1 text-[11px] font-black text-[#087da4]">RELAY ONLINE</span> : null}</div><small className="mt-1 block text-[#72879d]">{mission.id} · {mission.target?.podId} / {mission.target?.label} · {mission.assignedDroneId || "unassigned"}{mission.incidentId ? ` · incident ${mission.incidentId}` : ""}</small></div><b className="text-sm text-[#1768d8]">{Math.round(mission.progress || 0)}%</b></div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#e7eef5]"><span className="block h-full rounded-full bg-gradient-to-r from-[#1768d8] to-[#3fd2d0] transition-all" style={{ width: `${mission.progress || 0}%` }} /></div>
+                {mission.findings?.length ? <div className="mt-3 rounded-xl bg-[#fff8e8] px-3 py-2 text-sm text-[#7f5b12]"><b>Latest finding:</b> {mission.findings[mission.findings.length - 1].message}</div> : null}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {mission.status === "requested" ? <button disabled={actionBusy} onClick={() => missionAction(mission, "approve")} className="inline-flex items-center gap-1.5 rounded-lg bg-[#1768d8] px-3 py-2 text-xs font-black text-white"><CheckCircle2 size={14} /> Approve</button> : null}
+                  {mission.status === "approved" ? <button disabled={actionBusy} onClick={() => missionAction(mission, "launch")} className="inline-flex items-center gap-1.5 rounded-lg bg-[#14977f] px-3 py-2 text-xs font-black text-white"><Play size={14} /> Launch</button> : null}
+                  {["launching", "en_route", "on_station"].includes(mission.status) ? <button disabled={actionBusy} onClick={() => missionAction(mission, "pause")} className="inline-flex items-center gap-1.5 rounded-lg border border-[#cad8e5] px-3 py-2 text-xs font-black text-[#48647f]"><Pause size={14} /> Pause</button> : null}
+                  {mission.status === "paused" ? <button disabled={actionBusy} onClick={() => missionAction(mission, "resume")} className="inline-flex items-center gap-1.5 rounded-lg bg-[#1768d8] px-3 py-2 text-xs font-black text-white"><Play size={14} /> Resume</button> : null}
+                  {activeDroneStates.has(mission.status) && mission.status !== "returning" ? <button disabled={actionBusy} onClick={() => missionAction(mission, "return")} className="inline-flex items-center gap-1.5 rounded-lg border border-[#cad8e5] px-3 py-2 text-xs font-black text-[#48647f]"><RotateCcw size={14} /> Return home</button> : null}
+                  {mission.type === "medical_payload" && mission.status === "on_station" && mission.payloadStatus !== "delivered" ? <button disabled={actionBusy} onClick={() => missionAction(mission, "drop-payload")} className="inline-flex items-center gap-1.5 rounded-lg bg-[#8b5cf6] px-3 py-2 text-xs font-black text-white"><Package size={14} /> Release payload</button> : null}
+                  {activeDroneStates.has(mission.status) ? <button disabled={actionBusy} onClick={() => { if (window.confirm("Emergency-land this aircraft?")) missionAction(mission, "emergency-land"); }} className="rounded-lg border border-[#ffc0cc] px-3 py-2 text-xs font-black text-[#c72f4c]">Emergency land</button> : null}
+                </div>
+              </article>
+            );
+          })}
+          {!missions.length ? <div className="rounded-xl border border-dashed border-[#c8d6e4] p-8 text-center text-[#71879d]">No drone missions yet. Create a survey above or request one from an emergency card.</div> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SensorsPage({ overview }) {
   const readings = sensorReadingsForOverview(overview);
   const summary = sensorSummaryForOverview(overview, readings);
@@ -2282,6 +2494,20 @@ function App() {
       if (type === "alert:created") {
         setOverview((current) => current ? { ...current, alerts: upsertById(current.alerts || [], payload), counts: { ...current.counts, alerts: (current.counts.alerts || 0) + 1 } } : current);
       }
+      if (type.startsWith("mission:")) {
+        setOverview((current) => {
+          if (!current || !payload?.id) return current;
+          const droneMissions = upsertById(current.droneMissions || [], payload);
+          return {
+            ...current,
+            droneMissions,
+            counts: {
+              ...current.counts,
+              activeDroneMissions: droneMissions.filter((mission) => activeDroneStates.has(mission.status)).length
+            }
+          };
+        });
+      }
     });
     return () => socket.disconnect();
   }, []);
@@ -2401,12 +2627,42 @@ function App() {
     });
   };
 
+  const requestDroneForIncident = async (request) => {
+    const text = `${request.category || ""} ${request.message || ""}`.toLowerCase();
+    const type = text.includes("medical") || text.includes("medicine") || text.includes("insulin")
+      ? "medical_payload"
+      : text.includes("bridge") || text.includes("road") || text.includes("fire")
+        ? "bridge_inspection"
+        : text.includes("trapped") || text.includes("roof") || text.includes("stranded")
+          ? "victim_search"
+          : "flood_survey";
+    const result = await api("/api/drone-missions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        incidentId: request.id,
+        type,
+        target: {
+          podId: request.podId || "POD-04",
+          label: request.locationName || request.location || request.podName
+        },
+        requestedBy: { role: "command-center", name: "EOC Admin" }
+      })
+    });
+    if (!result.success) {
+      window.alert(result.message || "Unable to request a drone mission.");
+      return;
+    }
+    setRoute("/drones");
+  };
+
   const page = () => {
-    if (route === "/requests") return <RequestsPage requests={displayRequests} deliveries={deliveries} deleteRequest={deleteRequest} retryDeliveries={retryDeliveries} focusRequestId={focusedRequestId} onRequestSeen={markRequestSeen} />;
+    if (route === "/requests") return <RequestsPage requests={displayRequests} deliveries={deliveries} deleteRequest={deleteRequest} retryDeliveries={retryDeliveries} focusRequestId={focusedRequestId} onRequestSeen={markRequestSeen} onDroneMission={requestDroneForIncident} />;
     if (route === "/pods") return <PodsPage overview={derivedOverview} />;
     if (route === "/network") return <NetworkPage overview={derivedOverview} infraAction={infraAction} restoreAll={restoreAll} />;
     if (route === "/resources" || route === "/volunteers") return <ResourcesPage />;
     if (route === "/sensors") return <SensorsPage overview={derivedOverview} />;
+    if (route === "/drones") return <AerialOperationsPage />;
     if (route === "/alerts") return <AlertsPage overview={derivedOverview} broadcast={broadcast} unseenRequests={unseenRequestLogs} onOpenRequest={openRequestFromAlert} />;
     return <Dashboard overview={derivedOverview} requests={displayRequests} setRoute={setRoute} />;
   };

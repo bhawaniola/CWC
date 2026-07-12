@@ -20,11 +20,14 @@ const PORT = process.env.PORT || 9000;
 const MONGODB_URI =
   process.env.MONGODB_URI || "mongodb://mongodb:27017/sanjeevani-command-center";
 const DELIVERY_RETRY_INTERVAL_MS = Number(process.env.DELIVERY_RETRY_INTERVAL_MS || 5000);
+const DRONE_URL = String(process.env.DRONE_URL || "http://drone-service:9600").replace(/\/+$/, "");
+const DRONE_CONTROL_KEY = String(process.env.DRONE_CONTROL_KEY || "sanjeevani-drone-demo-key");
 const requests = [];
 const coordinatorEvents = [];
 const coordinatorMessages = [];
 const coordinatorDeliveries = [];
 const sensorReadings = [];
+const droneMissions = [];
 
 // SANJEEVANI-Shield: the cloud is the only holder of the alert-signing
 // private key. Pods fetch the public key once (through a link-node) and
@@ -47,6 +50,7 @@ const CoordinatorMessage = mongoose.model("CoordinatorMessage", new mongoose.Sch
 const CoordinatorDelivery = mongoose.model("CoordinatorDelivery", new mongoose.Schema({}, looseSchemaOptions));
 const CloudAlert = mongoose.model("CloudAlert", new mongoose.Schema({}, looseSchemaOptions));
 const SensorReading = mongoose.model("SensorReading", new mongoose.Schema({}, looseSchemaOptions));
+const DroneMission = mongoose.model("DroneMission", new mongoose.Schema({}, looseSchemaOptions));
 
 const POD_URLS = String(process.env.POD_URLS || "")
   .split(",")
@@ -647,6 +651,7 @@ function realtimeSnapshot() {
     coordinatorMessages,
     coordinatorDeliveries,
     sensorReadings,
+    droneMissions,
     alerts: alertsSent,
     generatedAt: nowIso()
   };
@@ -688,13 +693,14 @@ async function loadPersistedState() {
     return;
   }
 
-  const [storedRequests, storedEvents, storedMessages, storedDeliveries, storedAlerts, storedSensors] = await Promise.all([
+  const [storedRequests, storedEvents, storedMessages, storedDeliveries, storedAlerts, storedSensors, storedDroneMissions] = await Promise.all([
     CloudRequest.find({}).sort({ cloudReceivedAt: -1, createdAt: -1 }).limit(300).lean(),
     CoordinatorEvent.find({}).sort({ cloudReceivedAt: -1, createdAt: -1 }).limit(300).lean(),
     CoordinatorMessage.find({}).sort({ cloudReceivedAt: -1, createdAt: -1 }).limit(300).lean(),
     CoordinatorDelivery.find({}).sort({ updatedAt: -1, queuedAt: -1 }).limit(600).lean(),
     CloudAlert.find({}).sort({ seq: -1, issuedAt: -1 }).limit(50).lean(),
-    SensorReading.find({}).sort({ lastReadingAt: -1, createdAt: -1 }).limit(100).lean()
+    SensorReading.find({}).sort({ lastReadingAt: -1, createdAt: -1 }).limit(100).lean(),
+    DroneMission.find({}).sort({ updatedAt: -1, createdAt: -1 }).limit(200).lean()
   ]);
 
   requests.splice(0, requests.length, ...storedRequests.map(toPlain));
@@ -703,6 +709,7 @@ async function loadPersistedState() {
   coordinatorDeliveries.splice(0, coordinatorDeliveries.length, ...storedDeliveries.map(toPlain));
   alertsSent.splice(0, alertsSent.length, ...storedAlerts.map(toPlain));
   sensorReadings.splice(0, sensorReadings.length, ...storedSensors.map(toPlain));
+  droneMissions.splice(0, droneMissions.length, ...storedDroneMissions.map(toPlain));
   alertSeq = alertsSent.reduce((max, alert) => Math.max(max, Number(alert.seq) || 0), alertSeq);
 
   // Rebuild the live resource map from persisted coordinator events so the
@@ -726,6 +733,99 @@ async function persistDocument(Model, filter, document) {
     console.warn(`[cloud-api] MongoDB write failed: ${error.message}`);
     return false;
   }
+}
+
+function requireDroneControl(req, res, next) {
+  if (req.get("x-drone-control-token") !== DRONE_CONTROL_KEY) {
+    return res.status(403).json({ success: false, message: "Drone control authorization failed." });
+  }
+  next();
+}
+
+async function droneApi(method, path, data) {
+  const response = await axios({
+    method,
+    url: `${DRONE_URL}${path}`,
+    data,
+    timeout: Number(process.env.DRONE_TIMEOUT_MS || 8000),
+    headers: { "x-drone-control-token": DRONE_CONTROL_KEY }
+  });
+  return response.data?.data;
+}
+
+async function syncDroneRelayToPod(mission, enabled) {
+  if (mission.type !== "aerial_relay" || !mission.target?.podId) return;
+  const pod = POD_URLS.find((item) => item.podId === String(mission.target.podId).toUpperCase());
+  if (!pod) {
+    console.warn(`[cloud-api][drone][${mission.id}] target pod ${mission.target.podId} is not registered`);
+    return;
+  }
+  const state = enabled ? "enable" : "disable";
+  try {
+    await axios.post(
+      `${pod.url}/api/drone-relay/${state}`,
+      {
+        url: DRONE_URL,
+        missionId: mission.id,
+        droneId: mission.assignedDroneId,
+        activatedAt: mission.arrivedAt || nowIso()
+      },
+      { timeout: 3000, headers: { "x-drone-relay-token": DRONE_CONTROL_KEY } }
+    );
+    console.log(
+      `[cloud-api][drone][${mission.id}] ${state}d aerial relay for ${mission.target.podId} via ${mission.assignedDroneId || "drone"}`
+    );
+  } catch (error) {
+    console.warn(
+      `[cloud-api][drone][${mission.id}] could not ${state} relay at ${mission.target.podId}: ${error.response?.status || error.message}`
+    );
+  }
+}
+
+async function upsertDroneMission(mission, { emit = true, notify = true, eventType = "mission:updated", drone = null } = {}) {
+  if (!mission?.id) return null;
+  const existingIndex = droneMissions.findIndex((item) => item.id === mission.id);
+  const existing = existingIndex >= 0 ? droneMissions[existingIndex] : null;
+  const nextMission = {
+    ...mission,
+    lastEventType: eventType === "mission:refreshed" ? existing?.lastEventType || eventType : eventType,
+    telemetry: drone || mission.telemetry || existing?.telemetry || null,
+    cloudUpdatedAt: nowIso()
+  };
+  if (existingIndex >= 0) {
+    droneMissions[existingIndex] = { ...droneMissions[existingIndex], ...nextMission };
+  } else {
+    droneMissions.unshift(nextMission);
+  }
+  droneMissions.sort((left, right) => new Date(right.updatedAt || right.createdAt || 0) - new Date(left.updatedAt || left.createdAt || 0));
+  droneMissions.splice(200);
+  const stored = droneMissions.find((item) => item.id === mission.id);
+  await persistDocument(DroneMission, { id: stored.id }, stored);
+  if (stored.type === "aerial_relay" && Boolean(existing?.relayActive) !== Boolean(stored.relayActive)) {
+    syncDroneRelayToPod(stored, Boolean(stored.relayActive)).catch(() => {});
+  }
+  if (emit) emitRealtime(eventType, stored);
+  if (notify) webex.notifyDroneMission(stored, eventType, drone || stored.telemetry || {});
+  return stored;
+}
+
+async function refreshDroneMissions() {
+  try {
+    const remote = await droneApi("get", "/api/missions");
+    for (const mission of Array.isArray(remote) ? remote : []) {
+      await upsertDroneMission(mission, { emit: false, notify: false, eventType: "mission:refreshed" });
+    }
+    return { reachable: true, missions: droneMissions };
+  } catch (error) {
+    return { reachable: false, missions: droneMissions, error: error.response?.data?.message || error.message };
+  }
+}
+
+function sendDroneError(res, error) {
+  res.status(error.response?.status || error.status || 503).json({
+    success: false,
+    message: error.response?.data?.message || error.message || "Drone service unavailable."
+  });
 }
 
 async function deleteDocuments(Model, filter) {
@@ -1943,6 +2043,86 @@ async function upsertSensorReading(body, emit = true) {
   return storedReading;
 }
 
+app.get("/api/drones", async (req, res) => {
+  try {
+    const drones = await droneApi("get", "/api/drones");
+    res.json({ success: true, count: drones.length, data: drones, providerReachable: true });
+  } catch (error) {
+    res.json({ success: true, count: 0, data: [], providerReachable: false, message: error.response?.data?.message || error.message });
+  }
+});
+
+app.get("/api/drone-missions", async (req, res) => {
+  const state = await refreshDroneMissions();
+  res.json({
+    success: true,
+    count: state.missions.length,
+    data: state.missions,
+    providerReachable: state.reachable,
+    message: state.error
+  });
+});
+
+app.post("/api/drone-missions", requireDroneControl, async (req, res) => {
+  try {
+    const input = req.body || {};
+    const incidentId = input.incidentId || input.requestId || null;
+    const incident = incidentId ? requests.find((item) => item.id === incidentId) : null;
+    if (incidentId && !incident) {
+      return res.status(404).json({ success: false, message: "Linked emergency request was not found." });
+    }
+    const payload = {
+      ...input,
+      incidentId,
+      title: input.title || (incident ? `${input.type || "Drone response"}: ${incident.name || incident.category || incident.id}` : undefined),
+      target: {
+        podId: input.target?.podId || input.podId || incident?.podId || "POD-04",
+        latitude: input.target?.latitude,
+        longitude: input.target?.longitude,
+        label: input.target?.label || incident?.locationName || incident?.location || incident?.podName
+      },
+      requestedBy: input.requestedBy || { role: "command-center", name: "EOC Operator" }
+    };
+    const mission = await droneApi("post", "/api/missions", payload);
+    const stored = await upsertDroneMission(mission, { eventType: "mission:requested" });
+    res.status(201).json({ success: true, data: stored });
+  } catch (error) {
+    sendDroneError(res, error);
+  }
+});
+
+app.post("/api/drone-missions/:id/:action", requireDroneControl, async (req, res) => {
+  const action = String(req.params.action || "");
+  const allowed = new Set(["approve", "launch", "pause", "resume", "return", "emergency-land", "drop-payload"]);
+  if (!allowed.has(action)) {
+    return res.status(400).json({ success: false, message: "Unsupported drone mission action." });
+  }
+  try {
+    const mission = await droneApi("post", `/api/missions/${encodeURIComponent(req.params.id)}/${action}`, req.body || {});
+    const stored = await upsertDroneMission(mission, { eventType: `mission:${action}` });
+    res.json({ success: true, data: stored });
+  } catch (error) {
+    sendDroneError(res, error);
+  }
+});
+
+// Internal callback from drone-service. The shared token prevents a browser
+// from forging telemetry, relay state, or safety milestones.
+app.post("/api/drone-events", async (req, res) => {
+  if (req.get("x-drone-event-token") !== DRONE_CONTROL_KEY) {
+    return res.status(403).json({ success: false, message: "Drone event authorization failed." });
+  }
+  const event = req.body || {};
+  if (!event.mission?.id) {
+    return res.status(400).json({ success: false, message: "Drone event is missing its mission." });
+  }
+  const stored = await upsertDroneMission(event.mission, {
+    eventType: event.eventType || "mission:updated",
+    drone: event.drone || null
+  });
+  res.status(202).json({ success: true, data: stored });
+});
+
 app.get("/api/health", (req, res) => {
   res.json({
     success: true,
@@ -1956,6 +2136,7 @@ app.get("/api/health", (req, res) => {
       coordinatorDeliveries: coordinatorDeliveries.length,
       queuedCoordinatorDeliveries: coordinatorDeliveries.filter((delivery) => !["delivered", "resolved", "rejected"].includes(delivery.status)).length,
       sensorReadings: sensorReadings.length,
+      droneMissions: droneMissions.length,
       alertsSent: alertsSent.length,
       checkedAt: nowIso()
     }

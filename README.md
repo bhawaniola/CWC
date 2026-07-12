@@ -23,6 +23,7 @@ Three design principles run through the whole system:
 |   `-- server.js              # role templates, inbox, sync queue, shortage events
 |-- link-node/                 # shared satellite and celltower service image
 |-- sensor-simulator/          # simulated Meraki MT10/MT12/MT14 sensors + MT30 buttons
+|-- drone-service/             # mock fleet + provider-neutral FlytBase adapter boundary
 |-- simulation-controller/     # network drill controller + sensor spike UI on port 9300
 |-- pod-agent/                 # shared pod backend and React/Vite citizen SOS UI
 |   |-- client/                # modular React frontend source
@@ -66,6 +67,7 @@ CELLTOWER-1 health:        http://localhost:9201/health
 CELLTOWER-2 health:        http://localhost:9202/health
 Simulation controller UI:  http://localhost:9300      (network drills + sensor spikes)
 Sensor simulator API:      http://localhost:9500/status
+Drone service / video:     http://localhost:9600/health
 ```
 
 ## Active Services
@@ -82,6 +84,8 @@ satellite                satellite middleman forwarding to cloud-api
 celltower-1 / -2         cellular middlemen forwarding to cloud-api
 simulation-controller    fails/restores satellite + towers, drives sensor spikes
 sensor-simulator         Meraki MT fleet posting readings to pods every 4s (port 9500)
+drone-service            mock fleet, missions, telemetry, live video and
+                         FlytBase provider boundary (port 9600)
 pod-01..pod-10           local pod SOS app, triage, routing engine, queue, mesh relay
 *-coordinator (x9)       relief-team dashboards: role inbox, dispatch board,
                          request lifecycle, resource fields, own sync ladder
@@ -119,6 +123,9 @@ realtime socket events to the browser (with a polling fallback). Pages:
 - **Alerts** — a real notification center: the bell badge counts only what
   arrived since the operator last opened this page (persisted per browser),
   plus the signed-alert broadcast box (Ed25519) and the Shield security log.
+- **Aerial Ops** — shared drone fleet, approval-first mission control,
+  battery/GPS/signal telemetry, simulated live video, victim search, flood
+  survey, bridge inspection, medical payload delivery, and aerial relay.
 
 The three audiences are cleanly separated: **citizens** use the pod SOS pages
 (8001-8010), **relief teams** use the coordinator dashboards (8101-8109), and
@@ -250,6 +257,33 @@ Guard rails (same "enhancer, never gatekeeper" rule as the AI):
 
 Endpoints: `GET /api/webex/health`, `POST /api/webex/test` (rehearsal ping).
 The `.env` file is gitignored — the token must never reach GitHub.
+
+## Drone / FlytBase Integration — http://localhost:9600
+
+`drone-service/` is a provider-neutral command layer. In the default
+`DRONE_MODE=mock`, three aircraft simulate battery drain and charging,
+movement between pods, mission findings, payload state, live telemetry, and
+an animated video feed. Mission events return to `cloud-api`, persist in
+MongoDB, update the Command Center over its existing realtime socket, and
+post milestone alerts through the existing Webex bot.
+
+Every mission follows an approval-first lifecycle:
+
+```text
+requested -> approved -> launching -> en_route -> on_station -> returning -> completed
+```
+
+Supported mission types are `flood_survey`, `victim_search`,
+`bridge_inspection`, `medical_payload`, and `aerial_relay`. When an aerial
+relay reaches station, `cloud-api` authorizes the target pod to add the drone
+as a temporary link-node. The pod's existing queue worker selects
+`drone-relay`, forwards queued SOS batches through the aircraft service, and
+records `synced-via-aerial-drone-relay` in the cloud copy. Return Home or
+Emergency Land revokes the path and the pod resumes its normal routing ladder.
+
+To connect a real FlytBase tenant, set `DRONE_MODE=flytbase` plus the tenant
+URL, token, and endpoint paths in `.env`. Those credentials stay inside the
+drone-service container; browser code only calls SANJEEVANI's own API.
 
 ## Splunk Forwarding — enterprise after-action log
 

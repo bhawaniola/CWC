@@ -48,6 +48,8 @@ services:
       # Webex alerts: token lives in the gitignored .env file, never here.
       WEBEX_BOT_TOKEN: ${WEBEX_BOT_TOKEN:-}
       WEBEX_ROOM_ID: ${WEBEX_ROOM_ID:-}
+      DRONE_URL: http://drone-service:9600
+      DRONE_CONTROL_KEY: ${DRONE_CONTROL_KEY:-sanjeevani-drone-demo-key}
       # Splunk HEC forwarding: off unless both are set in .env (see README).
       SPLUNK_HEC_URL: ${SPLUNK_HEC_URL:-}
       SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:-}
@@ -55,6 +57,28 @@ services:
       SATELLITE_URL: http://satellite:9100
       CELL_TOWER_URLS: "CELLTOWER-1=http://celltower-1:9201,CELLTOWER-2=http://celltower-2:9202"
       COORDINATOR_URLS: "FIRE-01|FireDept|fire|http://fire-coordinator:8000|CELLTOWER-1;HOSPITAL-01|Hospital1|hospital|http://hospital-1-coordinator:8000|CELLTOWER-1;HOSPITAL-02|Hospital2|hospital|http://hospital-2-coordinator:8000|;SHELTER-A|ShelterCampA|shelter|http://shelter-a-coordinator:8000|;SHELTER-B|ShelterCampB|shelter|http://shelter-b-coordinator:8000|CELLTOWER-1;SHELTER-C|ShelterCamp2|shelter|http://shelter-c-coordinator:8000|CELLTOWER-2;WORKFORCE-01|WorkForceCamp1|workforce|http://workforce-1-coordinator:8000|CELLTOWER-2;WORKFORCE-02|WorkForceCamp2|workforce|http://workforce-2-coordinator:8000|CELLTOWER-2;FLOOD-01|FloodRescueDept|flood|http://flood-coordinator-1:8000|"
+    networks:
+      - sanjeevani-net
+
+  drone-service:
+    build: ./drone-service
+    container_name: sanjeevani-drone-service
+    depends_on:
+      - cloud-api
+    ports:
+      - "9600:9600"
+    environment:
+      PORT: 9600
+      DRONE_MODE: ${DRONE_MODE:-mock}
+      PUBLIC_BASE_URL: http://localhost:9600
+      DRONE_CONTROL_KEY: ${DRONE_CONTROL_KEY:-sanjeevani-drone-demo-key}
+      DRONE_EVENT_CALLBACK_URL: http://cloud-api:9000/api/drone-events
+      DRONE_EVENT_CALLBACK_KEY: ${DRONE_CONTROL_KEY:-sanjeevani-drone-demo-key}
+      CLOUD_URL: http://cloud-api:9000
+      FLYTBASE_API_BASE_URL: ${FLYTBASE_API_BASE_URL:-}
+      FLYTBASE_API_TOKEN: ${FLYTBASE_API_TOKEN:-}
+      FLYTBASE_DRONES_PATH: ${FLYTBASE_DRONES_PATH:-/drones}
+      FLYTBASE_MISSIONS_PATH: ${FLYTBASE_MISSIONS_PATH:-/missions}
     networks:
       - sanjeevani-net
 
@@ -133,6 +157,7 @@ services:
     depends_on:
       - cloud-api
       - simulation-controller
+      - drone-service
     ports:
       - "9400:9400"
     environment:
@@ -141,6 +166,7 @@ services:
       CLOUD_SOCKET_URL: http://cloud-api:9000
       SIMULATION_CONTROLLER_URL: http://simulation-controller:9300
       INFRA_CONTROL_KEY: sanjeevani-infra-demo-key
+      DRONE_CONTROL_KEY: ${DRONE_CONTROL_KEY:-sanjeevani-drone-demo-key}
       POD_URLS: "POD-01=http://pod-01:8000,POD-02=http://pod-02:8000,POD-03=http://pod-03:8000,POD-04=http://pod-04:8000,POD-05=http://pod-05:8000,POD-06=http://pod-06:8000,POD-07=http://pod-07:8000,POD-08=http://pod-08:8000,POD-09=http://pod-09:8000,POD-10=http://pod-10:8000"
     networks:
       - sanjeevani-net
